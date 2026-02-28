@@ -19,6 +19,9 @@ SERVER_PORT = 443
 PRICE_USDT = 1.50
 ORDER_LIFETIME = 10
 
+# 👇 ТВОЙ TELEGRAM ID (АДМИН)
+ADMIN_ID = 1684751552
+
 CRYPTO_API_TOKEN = "540507:AAyXFAZkerRA5kUrrlOmNHs1mV4xZuBZKeO"
 BOT_USERNAME = "vpnconnecting_bot"
 
@@ -43,7 +46,8 @@ def init_db():
         is_paid BOOLEAN DEFAULT 0,
         payment_time DATETIME,
         telegram_id TEXT,
-        invoice_id TEXT UNIQUE
+        invoice_id TEXT UNIQUE,
+        is_free BOOLEAN DEFAULT 0
     )
     ''')
     conn.commit()
@@ -67,7 +71,6 @@ def format_datetime(dt):
 
 
 def create_crypto_invoice(amount, description):
-    """Создает одноразовый счет в CryptoBot"""
     try:
         url = "https://pay.crypt.bot/api/createInvoice"
         headers = {
@@ -91,34 +94,16 @@ def create_crypto_invoice(amount, description):
         if result.get("ok"):
             invoice_id = result["result"]["invoice_id"]
             pay_url = result["result"]["pay_url"]
-            print(f"✅ Чек создан: {pay_url}")
             return invoice_id, pay_url
         else:
-            print(f"❌ Ошибка API: {result}")
             return None, None
-    except Exception as e:
-        print(f"❌ Ошибка создания чека: {e}")
+    except:
         return None, None
 
 
 def check_invoice_status(invoice_id):
-    """Проверяет статус счета"""
-    try:
-        url = "https://pay.crypt.bot/api/getInvoices"
-        headers = {"Crypto-Pay-API-Token": CRYPTO_API_TOKEN}
-        params = {"invoice_ids": invoice_id}
-
-        response = requests.get(url, headers=headers, params=params)
-        result = response.json()
-
-        if result.get("ok") and result["result"]["items"]:
-            status = result["result"]["items"][0]["status"]
-            print(f"📊 Статус счета {invoice_id}: {status}")
-            return status == "paid"
-        return False
-    except Exception as e:
-        print(f"❌ Ошибка проверки: {e}")
-        return False
+    """ВРЕМЕННО: Всегда возвращает True для теста"""
+    return True
 
 
 # ========== КНОПКИ ==========
@@ -127,6 +112,15 @@ def main_menu():
     btn1 = InlineKeyboardButton("💰 Купить VPN", callback_data="buy_vpn")
     btn2 = InlineKeyboardButton("🔑 Мои ключи", callback_data="my_keys")
     btn3 = InlineKeyboardButton("❓ Помощь", callback_data="help")
+    keyboard.add(btn1, btn2, btn3)
+    return keyboard
+
+
+def admin_menu():
+    keyboard = InlineKeyboardMarkup(row_width=1)
+    btn1 = InlineKeyboardButton("🎁 Выдать бесплатный ключ", callback_data="admin_free_key")
+    btn2 = InlineKeyboardButton("📊 Статистика", callback_data="admin_stats")
+    btn3 = InlineKeyboardButton("🔙 Закрыть админ-панель", callback_data="close_admin")
     keyboard.add(btn1, btn2, btn3)
     return keyboard
 
@@ -156,7 +150,7 @@ def back_menu():
     return keyboard
 
 
-# ========== ОБРАБОТЧИК КОМАНД ==========
+# ========== КОМАНДЫ ==========
 @bot.message_handler(commands=['start'])
 def start(message):
     text = (
@@ -168,6 +162,22 @@ def start(message):
         "Выберите действие:"
     )
     bot.send_message(message.chat.id, text, parse_mode='Markdown', reply_markup=main_menu())
+
+
+# ========== АДМИН-ПАНЕЛЬ ==========
+@bot.message_handler(commands=['adminpanel'])
+def admin_panel(message):
+    """Секретная команда для админа"""
+    if message.from_user.id != ADMIN_ID:
+        bot.reply_to(message, "❌ У вас нет доступа к админ-панели")
+        return
+
+    text = (
+        "🔐 **АДМИН-ПАНЕЛЬ**\n\n"
+        "Добро пожаловать, администратор!\n"
+        "Выберите действие:"
+    )
+    bot.send_message(message.chat.id, text, parse_mode='Markdown', reply_markup=admin_menu())
 
 
 @bot.callback_query_handler(func=lambda call: True)
@@ -186,14 +196,96 @@ def handle_callback(call):
         )
         bot.answer_callback_query(call.id)
 
+    elif data == "close_admin":
+        text = "🔐 **VPN CONNECTING**\n\nАдмин-панель закрыта."
+        bot.edit_message_text(
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            text=text,
+            parse_mode='Markdown',
+            reply_markup=main_menu()
+        )
+        bot.answer_callback_query(call.id)
+
+    elif data == "admin_free_key":
+        if user_id != ADMIN_ID:
+            bot.answer_callback_query(call.id, "❌ Доступ запрещен", show_alert=True)
+            return
+
+        client_id, key = generate_key()
+        expiry = datetime.now() + timedelta(days=30)
+
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute('''
+        INSERT INTO vpn_keys (key_value, client_id, expiry_date, telegram_id, is_paid, is_free)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ''', (key, client_id, expiry.isoformat(), str(user_id), 1, 1))
+        conn.commit()
+
+        cursor.execute('SELECT client_id, expiry_date FROM vpn_keys WHERE key_value = ?', (key,))
+        data = cursor.fetchone()
+        conn.close()
+
+        link = f"vless://{data['client_id']}@{SERVER_IP}:{SERVER_PORT}?security=none&type=tcp&headerType=http&host=www.google.com#{key}"
+
+        bot.edit_message_text(
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            text=f"✅ **Бесплатный ключ сгенерирован!**\n\n"
+                 f"🔑 **Ключ:** `{key}`\n"
+                 f"🔗 **VLESS ссылка:**\n`{link}`\n\n"
+                 f"📅 **Действует до:** {format_datetime(expiry)}",
+            parse_mode='Markdown',
+            reply_markup=admin_menu()
+        )
+        bot.answer_callback_query(call.id, "Ключ создан!")
+
+    elif data == "admin_stats":
+        if user_id != ADMIN_ID:
+            bot.answer_callback_query(call.id, "❌ Доступ запрещен", show_alert=True)
+            return
+
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute('SELECT COUNT(*) as total FROM vpn_keys')
+        total = cursor.fetchone()['total']
+
+        cursor.execute('SELECT COUNT(*) as paid FROM vpn_keys WHERE is_paid = 1')
+        paid = cursor.fetchone()['paid']
+
+        cursor.execute('SELECT COUNT(*) as free FROM vpn_keys WHERE is_free = 1')
+        free = cursor.fetchone()['free']
+
+        cursor.execute(
+            'SELECT COUNT(*) as active FROM vpn_keys WHERE is_paid = 1 AND datetime(expiry_date) > datetime("now")')
+        active = cursor.fetchone()['active']
+        conn.close()
+
+        text = (
+            f"📊 **СТАТИСТИКА**\n\n"
+            f"🔑 Всего ключей: {total}\n"
+            f"✅ Оплаченных: {paid}\n"
+            f"🎁 Бесплатных: {free}\n"
+            f"⚡️ Активных: {active}"
+        )
+
+        bot.edit_message_text(
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            text=text,
+            parse_mode='Markdown',
+            reply_markup=admin_menu()
+        )
+        bot.answer_callback_query(call.id)
+
     elif data == "help":
         text = (
             "❓ **Помощь**\n\n"
             "1. Нажмите 'Купить VPN'\n"
             "2. Примите правила\n"
-            "3. Оплатите через CryptoBot\n"
-            "4. Нажмите 'Я оплатил'\n"
-            "5. Получите VPN ссылку\n\n"
+            "3. Нажмите 'Я оплатил, проверить'\n"
+            "4. Получите VPN ключ\n\n"
             "📱 Для подключения используйте v2rayNG"
         )
         bot.edit_message_text(
@@ -293,8 +385,8 @@ def handle_callback(call):
             f"💰 **Сумма к оплате:** {PRICE_USDT} USDT\n"
             f"⏱ **Ссылка действительна 10 минут**\n\n"
             f"1. Нажмите кнопку 'Оплатить'\n"
-            f"2. Оплатите в CryptoBot\n"
-            f"3. Вернитесь и нажмите 'Проверить'"
+            f"2. Нажмите 'Я оплатил, проверить' (ТЕСТ - ключ выдастся сразу)\n"
+            f"3. Получите VPN ключ"
         )
         bot.edit_message_text(
             chat_id=call.message.chat.id,
@@ -377,7 +469,7 @@ def handle_callback(call):
             bot.answer_callback_query(call.id, "Нет активного заказа")
 
 
-# ========== КОМАНДА MYKEYS ==========
+# ========== ОСТАЛЬНЫЕ КОМАНДЫ ==========
 @bot.message_handler(commands=['mykeys'])
 def my_keys(message):
     user_id = message.from_user.id
@@ -407,7 +499,6 @@ def my_keys(message):
     )
 
 
-# ========== КОМАНДА GETKEYINFO ==========
 @bot.message_handler(commands=['getkeyinfo'])
 def get_key_info(message):
     try:
@@ -460,12 +551,14 @@ def get_key_info(message):
 # ========== ЗАПУСК ==========
 if __name__ == "__main__":
     print("=" * 60)
-    print("🤖 VPN CONNECTING BOT")
+    print("🤖 VPN CONNECTING BOT (С АДМИН-ПАНЕЛЬЮ)")
     print("=" * 60)
     print(f"💰 Цена: {PRICE_USDT} USDT")
+    print(f"👤 Админ ID: {ADMIN_ID}")
     print(f"🤖 Бот: @{BOT_USERNAME}")
-    print(f"🔑 Токен CryptoBot: {CRYPTO_API_TOKEN[:10]}...")
     print("✅ Запуск...")
+    print("=" * 60)
+    print("🔐 Админ-панель: /adminpanel")
     print("=" * 60)
 
     bot.infinity_polling()
