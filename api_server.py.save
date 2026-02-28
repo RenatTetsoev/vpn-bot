@@ -1,0 +1,168 @@
+from flask import Flask, request, jsonify
+
+from flask_cors import CORS
+import sqlite3
+from datetime import datetime
+import sys
+
+app = Flask(__name__)
+CORS(app)
+
+
+def log_message(msg):
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    print(f"[{timestamp}] {msg}")
+    sys.stdout.flush()
+
+
+def get_db():
+    conn = sqlite3.connect('vpn_database.db', timeout=10)
+    conn.row_factory = sqlite3.Row
+    conn.execute('PRAGMA journal_mode=WAL')
+    return conn
+
+
+def init_db():
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS keys (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        key_value TEXT UNIQUE NOT NULL,
+        wg_public_key TEXT,
+        wg_private_key TEXT,
+        wg_address TEXT,
+        activation_date DATETIME,
+        expiry_date DATETIME,
+        is_active BOOLEAN DEFAULT 0,
+        is_blocked BOOLEAN DEFAULT 0,
+        telegram_id TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+    ''')
+    conn.commit()
+    conn.close()
+    log_message("✅ База данных инициализирована")
+
+
+@app.after_request
+def add_header(response):
+    response.headers['Content-Type'] = 'application/json'
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    return response
+
+
+@app.route('/ping', methods=['GET'])
+def ping():
+    return jsonify({'status': 'ok', 'message': 'Сервер работает!'})
+
+
+@app.route('/check_key', methods=['POST'])
+def check_key():
+    try:
+        data = request.json
+        key = data.get('key')
+        log_message(f"🔍 Проверка ключа: {key}")
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM keys WHERE key_value = ?', (key,))
+        key_data = cursor.fetchone()
+        if not key_data:
+            return jsonify({'valid': False, 'message': '❌ Ключ не найден'})
+        if key_data['is_blocked']:
+            return jsonify({'valid': False, 'message': '❌ Ключ заблокирован'})
+        expiry = datetime.fromisoformat(key_data['expiry_date'])
+        now = datetime.now()
+        if now > expiry:
+            return jsonify({'valid': False, 'message': '❌ Срок действия истек'})
+        days_left = (expiry - now).days
+        return jsonify({
+            'valid': True,
+            'message': '✅ Ключ действителен',
+            'key_info': {
+                'key': key,
+                'activation_date': key_data['activation_date'] or now.isoformat(),
+                'expiry_date': key_data['expiry_date'],
+                'days_left': days_left
+            }
+        })
+    except Exception as e:
+        return jsonify({'valid': False, 'message': f'❌ Ошибка: {str(e)}'})
+
+
+@app.route('/activate_key', methods=['POST'])
+def activate_key():
+    try:
+        data = request.json
+        key = data.get('key')
+        log_message(f"🔌 Активация ключа: {key}")
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM keys WHERE key_value = ?', (key,))
+        key_data = cursor.fetchone()
+        if not key_data:
+            return jsonify({'valid': False, 'message': '❌ Ключ не найден'})
+        if not key_data['is_active']:
+            now = datetime.now()
+            cursor.execute('UPDATE keys SET is_active = 1, activation_date = ? WHERE key_value = ?',
+                           (now.isoformat(), key))
+            conn.commit()
+            log_message(f"✅ Ключ активирован: {key}")
+        return jsonify({'valid': True, 'message': '✅ Ключ активирован'})
+    except Exception as e:
+        return jsonify({'valid': False, 'message': f'❌ Ошибка: {str(e)}'})
+
+
+@app.route('/get_wg_config', methods=['POST'])
+def get_wg_config():
+    try:
+        data = request.json
+        key = data.get('key')
+        log_message(f"📡 Запрос WG конфига для ключа: {key}")
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM keys WHERE key_value = ?', (key,))
+        key_data = cursor.fetchone()
+        if not key_data:
+            return jsonify({'success': False, 'message': 'Ключ не найден'})
+
+        # ЗДЕСЬ ВСТАВЬ СВОЙ ПУБЛИЧНЫЙ КЛЮЧ СЕРВЕРА!
+        SERVER_PUBLIC_KEY = "ТВОЙ_ПУБЛИЧНЫЙ_КЛЮЧ_СЕРВЕРА"  # Из /etc/wireguard/server_public.key
+
+        wg_config = {
+            'private_key': key_data['wg_private_key'],
+            'address': key_data['wg_address'] + '/24',
+            'server_public_key': SERVER_PUBLIC_KEY,
+            'server_endpoint': '95.81.102.13:51820',
+            'dns': '8.8.8.8'
+        }
+        log_message(f"📤 Отправка WG конфига для {key_data['wg_address']}")
+        return jsonify({'success': True, 'config': wg_config})
+    except Exception as e:
+        log_message(f"❌ Ошибка: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)})
+
+
+@app.route('/debug/keys', methods=['GET'])
+def debug_keys():
+    try:
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute('SELECT id, key_value, wg_address, is_active FROM keys')
+        keys = cursor.fetchall()
+        conn.close()
+        keys_list = [dict(key) for key in keys]
+        return jsonify({'count': len(keys_list), 'keys': keys_list})
+    except Exception as e:
+        return jsonify({'error': str(e)})
+
+
+if __name__ == '__main__':
+    print("=" * 60)
+    print("🚀 ЗАПУСК VPN API СЕРВЕРА")
+    print("=" * 60)
+    init_db()
+    print(f"📁 База данных: vpn_database.db")
+    print(f"🌐 Сервер: 95.81.102.13:5000")
+    print("=" * 60)
+    app.run(host='0.0.0.0', port=5000, debug=True)
