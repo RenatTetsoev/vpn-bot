@@ -1,0 +1,14 @@
+# Базы данных
+*.db
+*.sqlite
+*.sqlite3
+*.sqbpro
+vpn_database.db
+
+# Виртуальное окружение
+venv/
+__pycache__/
+*.pyc
+
+# Логи
+*.log
