@@ -7,6 +7,7 @@ import json
 import threading
 import time
 import requests
+import subprocess
 from datetime import datetime, timedelta
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
@@ -24,6 +25,36 @@ ADMIN_ID = 1684751552
 
 CRYPTO_API_TOKEN = "540507:AAyXFAZkerRA5kUrrlOmNHs1mV4xZuBZKeO"
 BOT_USERNAME = "vpnconnecting_bot"
+
+
+# ========== ФУНКЦИЯ ДОБАВЛЕНИЯ В XRAY ==========
+def add_client_to_xray(client_id, email):
+    """Добавляет клиента в конфиг Xray и перезапускает сервис"""
+    try:
+        # Читаем текущий конфиг
+        with open('/usr/local/etc/xray/config.json', 'r') as f:
+            config = json.load(f)
+
+        # Добавляем нового клиента
+        new_client = {
+            "id": client_id,
+            "email": email,
+            "level": 0
+        }
+
+        config['inbounds'][0]['settings']['clients'].append(new_client)
+
+        # Записываем обновленный конфиг
+        with open('/usr/local/etc/xray/config.json', 'w') as f:
+            json.dump(config, f, indent=2)
+
+        # Перезапускаем Xray
+        subprocess.run(['systemctl', 'restart', 'xray'])
+        print(f"✅ Клиент {client_id} добавлен в Xray")
+        return True
+    except Exception as e:
+        print(f"❌ Ошибка добавления клиента в Xray: {e}")
+        return False
 
 
 # ========== БАЗА ДАННЫХ ==========
@@ -71,6 +102,7 @@ def format_datetime(dt):
 
 
 def create_crypto_invoice(amount, description):
+    """Создает одноразовый счет в CryptoBot"""
     try:
         url = "https://pay.crypt.bot/api/createInvoice"
         headers = {
@@ -94,16 +126,34 @@ def create_crypto_invoice(amount, description):
         if result.get("ok"):
             invoice_id = result["result"]["invoice_id"]
             pay_url = result["result"]["pay_url"]
+            print(f"✅ Чек создан: {pay_url}")
             return invoice_id, pay_url
         else:
+            print(f"❌ Ошибка API: {result}")
             return None, None
-    except:
+    except Exception as e:
+        print(f"❌ Ошибка создания чека: {e}")
         return None, None
 
 
 def check_invoice_status(invoice_id):
-    """ВРЕМЕННО: Всегда возвращает True для теста"""
-    return True
+    """Проверяет статус счета"""
+    try:
+        url = "https://pay.crypt.bot/api/getInvoices"
+        headers = {"Crypto-Pay-API-Token": CRYPTO_API_TOKEN}
+        params = {"invoice_ids": invoice_id}
+
+        response = requests.get(url, headers=headers, params=params)
+        result = response.json()
+
+        if result.get("ok") and result["result"]["items"]:
+            status = result["result"]["items"][0]["status"]
+            print(f"📊 Статус счета {invoice_id}: {status}")
+            return status == "paid"
+        return False
+    except Exception as e:
+        print(f"❌ Ошибка проверки: {e}")
+        return False
 
 
 # ========== КНОПКИ ==========
@@ -150,7 +200,7 @@ def back_menu():
     return keyboard
 
 
-# ========== КОМАНДЫ ==========
+# ========== ОБРАБОТЧИК КОМАНД ==========
 @bot.message_handler(commands=['start'])
 def start(message):
     text = (
@@ -222,24 +272,24 @@ def handle_callback(call):
         VALUES (?, ?, ?, ?, ?, ?)
         ''', (key, client_id, expiry.isoformat(), str(user_id), 1, 1))
         conn.commit()
-
-        cursor.execute('SELECT client_id, expiry_date FROM vpn_keys WHERE key_value = ?', (key,))
-        data = cursor.fetchone()
         conn.close()
 
-        link = f"vless://{data['client_id']}@{SERVER_IP}:{SERVER_PORT}?security=none&type=tcp&headerType=http&host=www.google.com#{key}"
+        # 👇 ДОБАВЛЯЕМ В XRAY
+        add_client_to_xray(client_id, f"admin_free_{key}")
+
+        link = f"vless://{client_id}@{SERVER_IP}:{SERVER_PORT}?security=none&type=tcp&headerType=http&host=www.google.com#{key}"
 
         bot.edit_message_text(
             chat_id=call.message.chat.id,
             message_id=call.message.message_id,
-            text=f"✅ **Бесплатный ключ сгенерирован!**\n\n"
+            text=f"✅ **Бесплатный ключ сгенерирован и добавлен в Xray!**\n\n"
                  f"🔑 **Ключ:** `{key}`\n"
                  f"🔗 **VLESS ссылка:**\n`{link}`\n\n"
                  f"📅 **Действует до:** {format_datetime(expiry)}",
             parse_mode='Markdown',
             reply_markup=admin_menu()
         )
-        bot.answer_callback_query(call.id, "Ключ создан!")
+        bot.answer_callback_query(call.id, "Ключ создан и добавлен в Xray!")
 
     elif data == "admin_stats":
         if user_id != ADMIN_ID:
@@ -284,8 +334,9 @@ def handle_callback(call):
             "❓ **Помощь**\n\n"
             "1. Нажмите 'Купить VPN'\n"
             "2. Примите правила\n"
-            "3. Нажмите 'Я оплатил, проверить'\n"
-            "4. Получите VPN ключ\n\n"
+            "3. Оплатите через CryptoBot\n"
+            "4. Нажмите 'Я оплатил'\n"
+            "5. Получите VPN ссылку\n\n"
             "📱 Для подключения используйте v2rayNG"
         )
         bot.edit_message_text(
@@ -371,10 +422,10 @@ def handle_callback(call):
 
         conn = get_db()
         cursor = conn.cursor()
-        cursor.execute(
-            'INSERT INTO vpn_keys (key_value, client_id, expiry_date, telegram_id, is_paid, invoice_id) VALUES (?, ?, ?, ?, ?, ?)',
-            (key, client_id, expiry.isoformat(), str(user_id), 0, invoice_id)
-        )
+        cursor.execute('''
+        INSERT INTO vpn_keys (key_value, client_id, expiry_date, telegram_id, is_paid, invoice_id)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ''', (key, client_id, expiry.isoformat(), str(user_id), 0, invoice_id))
         conn.commit()
         conn.close()
 
@@ -385,8 +436,8 @@ def handle_callback(call):
             f"💰 **Сумма к оплате:** {PRICE_USDT} USDT\n"
             f"⏱ **Ссылка действительна 10 минут**\n\n"
             f"1. Нажмите кнопку 'Оплатить'\n"
-            f"2. Нажмите 'Я оплатил, проверить' (ТЕСТ - ключ выдастся сразу)\n"
-            f"3. Получите VPN ключ"
+            f"2. Оплатите в CryptoBot\n"
+            f"3. Вернитесь и нажмите 'Проверить'"
         )
         bot.edit_message_text(
             chat_id=call.message.chat.id,
@@ -409,38 +460,44 @@ def handle_callback(call):
         if check_invoice_status(invoice_id):
             conn = get_db()
             cursor = conn.cursor()
-            cursor.execute(
-                'UPDATE vpn_keys SET is_paid = 1, payment_time = ? WHERE key_value = ?',
-                (datetime.now().isoformat(), key)
-            )
-            conn.commit()
-
             cursor.execute('SELECT client_id, expiry_date FROM vpn_keys WHERE key_value = ?', (key,))
             data = cursor.fetchone()
+
+            if data:
+                client_id = data['client_id']
+
+                # 👇 ДОБАВЛЯЕМ В XRAY
+                add_client_to_xray(client_id, f"user_{user_id}_{key}")
+
+                # Обновляем статус оплаты
+                cursor.execute('''
+                UPDATE vpn_keys SET is_paid = 1, payment_time = ? WHERE key_value = ?
+                ''', (datetime.now().isoformat(), key))
+                conn.commit()
+
+                link = f"vless://{client_id}@{SERVER_IP}:{SERVER_PORT}?security=none&type=tcp&headerType=http&host=www.google.com#{key}"
+
+                bot.send_message(
+                    user_id,
+                    f"✅ **ОПЛАЧЕНО!**\n\n"
+                    f"🔑 **Ключ:** `{key}`\n"
+                    f"🔗 **VPN CONNECTING ссылка:**\n`{link}`\n\n"
+                    f"📅 **Действует до:** {format_datetime(datetime.fromisoformat(data['expiry_date']))}",
+                    parse_mode='Markdown',
+                    reply_markup=main_menu()
+                )
+
+                if user_id in orders:
+                    del orders[user_id]
+
+                bot.edit_message_text(
+                    chat_id=call.message.chat.id,
+                    message_id=call.message.message_id,
+                    text="✅ Платеж подтвержден! Ключ отправлен в личные сообщения и добавлен в Xray.",
+                    reply_markup=main_menu()
+                )
+                bot.answer_callback_query(call.id, "Ключ активирован!")
             conn.close()
-
-            link = f"vless://{data['client_id']}@{SERVER_IP}:{SERVER_PORT}?security=none&type=tcp&headerType=http&host=www.google.com#{key}"
-
-            bot.send_message(
-                user_id,
-                f"✅ **ОПЛАЧЕНО!**\n\n"
-                f"🔑 **Ключ:** `{key}`\n"
-                f"🔗 **VPN CONNECTING ссылка:**\n`{link}`\n\n"
-                f"📅 **Действует до:** {format_datetime(datetime.fromisoformat(data['expiry_date']))}",
-                parse_mode='Markdown',
-                reply_markup=main_menu()
-            )
-
-            if user_id in orders:
-                del orders[user_id]
-
-            bot.edit_message_text(
-                chat_id=call.message.chat.id,
-                message_id=call.message.message_id,
-                text="✅ Платеж подтвержден! Ключ отправлен в личные сообщения.",
-                reply_markup=main_menu()
-            )
-            bot.answer_callback_query(call.id, "Ключ активирован!")
         else:
             bot.answer_callback_query(
                 call.id,
@@ -469,7 +526,7 @@ def handle_callback(call):
             bot.answer_callback_query(call.id, "Нет активного заказа")
 
 
-# ========== ОСТАЛЬНЫЕ КОМАНДЫ ==========
+# ========== КОМАНДА MYKEYS ==========
 @bot.message_handler(commands=['mykeys'])
 def my_keys(message):
     user_id = message.from_user.id
@@ -499,6 +556,7 @@ def my_keys(message):
     )
 
 
+# ========== КОМАНДА GETKEYINFO ==========
 @bot.message_handler(commands=['getkeyinfo'])
 def get_key_info(message):
     try:
@@ -551,11 +609,12 @@ def get_key_info(message):
 # ========== ЗАПУСК ==========
 if __name__ == "__main__":
     print("=" * 60)
-    print("🤖 VPN CONNECTING BOT (С АДМИН-ПАНЕЛЬЮ)")
+    print("🤖 VPN CONNECTING BOT (С АВТОДОБАВЛЕНИЕМ В XRAY)")
     print("=" * 60)
     print(f"💰 Цена: {PRICE_USDT} USDT")
     print(f"👤 Админ ID: {ADMIN_ID}")
     print(f"🤖 Бот: @{BOT_USERNAME}")
+    print(f"🔑 Токен CryptoBot: {CRYPTO_API_TOKEN[:10]}...")
     print("✅ Запуск...")
     print("=" * 60)
     print("🔐 Админ-панель: /adminpanel")
