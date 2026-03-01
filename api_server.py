@@ -30,7 +30,7 @@ def add_header(response):
 
 @app.route('/ping', methods=['GET'])
 def ping():
-    return jsonify({'status': 'ok', 'message': 'VLESS сервер работает!'})
+    return jsonify({'status': 'ok', 'message': 'VPN сервер работает!'})
 
 
 @app.route('/check_key', methods=['POST'])
@@ -41,26 +41,18 @@ def check_key():
         device_info = data.get('device_info', {})
         device_id = device_info.get('device', 'unknown')
 
-        log_message(f"🔍 Проверка ключа: {key} с устройства {device_id}")
+        log_message(f"🔍 Проверка ключа: {key}")
 
         conn = get_db()
         cursor = conn.cursor()
-        cursor.execute('SELECT * FROM vless_keys WHERE key_value = ?', (key,))
+        cursor.execute('SELECT * FROM vpn_keys WHERE key_value = ?', (key,))
         key_data = cursor.fetchone()
 
         if not key_data:
             return jsonify({'valid': False, 'message': '❌ Ключ не найден'})
 
-        # Проверка оплаты
         if not key_data['is_paid']:
             return jsonify({'valid': False, 'message': '❌ Ключ не оплачен'})
-
-        if key_data['is_blocked']:
-            return jsonify({'valid': False, 'message': '❌ Ключ заблокирован'})
-
-        # Проверка на одно устройство
-        if key_data['is_active'] and key_data['device_id'] and key_data['device_id'] != device_id:
-            return jsonify({'valid': False, 'message': '❌ Ключ уже используется на другом устройстве'})
 
         expiry = datetime.fromisoformat(key_data['expiry_date'])
         now = datetime.now()
@@ -70,48 +62,29 @@ def check_key():
 
         days_left = (expiry - now).days
 
-        # Если ключ активируется впервые
-        if not key_data['is_active']:
-            cursor.execute('''
-                UPDATE vless_keys 
-                SET is_active = 1, activation_date = ?, device_id = ?, last_used = ? 
-                WHERE key_value = ?
-            ''', (now.isoformat(), device_id, now.isoformat(), key))
-            conn.commit()
-            log_message(f"✅ Ключ {key} активирован на устройстве {device_id}")
-        else:
-            cursor.execute('UPDATE vless_keys SET last_used = ? WHERE key_value = ?',
-                           (now.isoformat(), key))
-            conn.commit()
-
-        conn.close()
-
         return jsonify({
             'valid': True,
             'message': '✅ Ключ действителен',
             'key_info': {
                 'key': key,
                 'client_id': key_data['client_id'],
-                'activation_date': key_data['activation_date'] or now.isoformat(),
                 'expiry_date': key_data['expiry_date'],
                 'days_left': days_left
             }
         })
     except Exception as e:
-        log_message(f"❌ Ошибка: {str(e)}")
         return jsonify({'valid': False, 'message': f'❌ Ошибка: {str(e)}'})
 
 
-@app.route('/get_vless_config', methods=['POST'])
-def get_vless_config():
+@app.route('/get_config', methods=['POST'])
+def get_config():
     try:
         data = request.json
         key = data.get('key')
-        log_message(f"📡 Запрос конфига для ключа: {key}")
 
         conn = get_db()
         cursor = conn.cursor()
-        cursor.execute('SELECT * FROM vless_keys WHERE key_value = ?', (key,))
+        cursor.execute('SELECT * FROM vpn_keys WHERE key_value = ?', (key,))
         key_data = cursor.fetchone()
 
         if not key_data:
@@ -120,7 +93,7 @@ def get_vless_config():
         if not key_data['is_paid']:
             return jsonify({'success': False, 'message': 'Ключ не оплачен'})
 
-        vless_config = {
+        config = {
             'client_id': key_data['client_id'],
             'server': '95.81.102.13',
             'port': 443,
@@ -128,37 +101,18 @@ def get_vless_config():
             'type': 'tcp',
             'headerType': 'http',
             'host': 'www.google.com',
-            'path': '/',
-            'tls': False
+            'path': '/'
         }
 
-        log_message(f"📤 Отправка конфига для ключа {key}")
-        return jsonify({'success': True, 'config': vless_config})
+        return jsonify({'success': True, 'config': config})
     except Exception as e:
-        log_message(f"❌ Ошибка: {str(e)}")
         return jsonify({'success': False, 'message': str(e)})
-
-
-@app.route('/debug/keys', methods=['GET'])
-def debug_keys():
-    try:
-        conn = get_db()
-        cursor = conn.cursor()
-        cursor.execute(
-            'SELECT id, key_value, client_id, email, is_paid, is_active, device_id, expiry_date FROM vless_keys')
-        keys = cursor.fetchall()
-        conn.close()
-        keys_list = [dict(key) for key in keys]
-        return jsonify({'count': len(keys_list), 'keys': keys_list})
-    except Exception as e:
-        return jsonify({'error': str(e)})
 
 
 if __name__ == '__main__':
     print("=" * 60)
-    print("🚀 ЗАПУСК VLESS API СЕРВЕРА")
+    print("🚀 ЗАПУСК VPN API СЕРВЕРА")
     print("=" * 60)
-    print(f"📁 База данных: vpn_database.db")
     print(f"🌐 Сервер: 95.81.102.13:5000")
     print("=" * 60)
     app.run(host='0.0.0.0', port=5000, debug=True)
