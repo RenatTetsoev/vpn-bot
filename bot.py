@@ -71,6 +71,7 @@ def init_db():
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         key_value TEXT UNIQUE NOT NULL,
         client_id TEXT UNIQUE NOT NULL,
+        full_link TEXT,  # Добавлено поле для полной ссылки
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         expiry_date DATETIME,
         is_paid BOOLEAN DEFAULT 0,
@@ -358,19 +359,19 @@ def handle_callback(call):
         client_id, key = generate_key()
         expiry = datetime.now() + timedelta(days=3)
         
+        # Формируем полную ссылку
+        link = f"vless://{client_id}@{SERVER_IP}:{SERVER_PORT}?security=none&type=tcp#{key}"
+        
         cursor.execute('''
-        INSERT INTO vpn_keys (key_value, client_id, expiry_date, telegram_id, is_paid, is_free, plan_name)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        ''', (key, client_id, expiry.isoformat(), str(user_id), 1, 1, "free_3days"))
+        INSERT INTO vpn_keys (key_value, client_id, full_link, expiry_date, telegram_id, is_paid, is_free, plan_name)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (key, client_id, link, expiry.isoformat(), str(user_id), 1, 1, "free_3days"))
         conn.commit()
         conn.close()
         
         add_client_to_xray(client_id, f"free_3days_{key}")
         
-        link = f"vless://{client_id}@{SERVER_IP}:{SERVER_PORT}?security=none&type=tcp#{key}"
-        
         bot.edit_message_text(f"✅ **Ваш бесплатный ключ на 3 дня:**\n\n"
-                              f"🔑 `{key}`\n"
                               f"🔗 `{link}`\n\n"
                               f"📅 Действует до: {format_datetime(expiry)}",
                              chat_id=call.message.chat.id,
@@ -394,25 +395,10 @@ def handle_callback(call):
                                  message_id=call.message.message_id,
                                  parse_mode='Markdown',
                                  reply_markup=confirm_menu())
-            # Сохраняем выбранный план для использования после подтверждения
+            # Сохраняем выбранный план в данных колбэка
             bot.answer_callback_query(call.id)
-            # Здесь нужно сохранить выбранный план, например в словаре
-            # Для простоты будем использовать callback_data с планом
-            call.data = f"confirm_plan_{plan_id}"
-
-    elif data.startswith("confirm_plan_"):
-        plan_id = data.replace("confirm_plan_", "")
-        if plan_id in PLANS:
-            plan = PLANS[plan_id]
-            # Платный тариф - показываем способы оплаты
-            bot.edit_message_text(f"💳 **{plan['name']}**\n\n"
-                                  f"💰 Цена: {plan['price_rub']}₽ / {plan['price_usdt']} USDT\n\n"
-                                  f"Выберите способ оплаты:",
-                                 chat_id=call.message.chat.id,
-                                 message_id=call.message.message_id,
-                                 parse_mode='Markdown',
-                                 reply_markup=payment_methods_menu(plan_id, plan))
-            bot.answer_callback_query(call.id)
+            # В реальном коде нужно сохранять выбранный план, например во временном словаре
+            # Для простоты в этом примере используем прямой переход после подтверждения
 
     elif data == "accept_rules":
         # Возвращаемся к выбору тарифа
@@ -430,6 +416,9 @@ def handle_callback(call):
         client_id, key = generate_key()
         expiry = datetime.now() + timedelta(days=plan["days"])
         
+        # Формируем полную ссылку
+        link = f"vless://{client_id}@{SERVER_IP}:{SERVER_PORT}?security=none&type=tcp#{key}"
+        
         invoice_id, pay_url = create_crypto_invoice(plan["price_usdt"], f"{plan['name']} ключ {key}")
         
         if not invoice_id:
@@ -439,9 +428,9 @@ def handle_callback(call):
         conn = get_db()
         cursor = conn.cursor()
         cursor.execute('''
-        INSERT INTO vpn_keys (key_value, client_id, expiry_date, telegram_id, is_paid, plan_name, invoice_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        ''', (key, client_id, expiry.isoformat(), str(user_id), 0, plan_id, invoice_id))
+        INSERT INTO vpn_keys (key_value, client_id, full_link, expiry_date, telegram_id, is_paid, plan_name, invoice_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (key, client_id, link, expiry.isoformat(), str(user_id), 0, plan_id, invoice_id))
         conn.commit()
         conn.close()
         
@@ -477,20 +466,17 @@ def handle_callback(call):
             ''', (datetime.now().isoformat(), key))
             conn.commit()
             
-            cursor.execute('SELECT client_id, expiry_date FROM vpn_keys WHERE key_value = ?', (key,))
+            cursor.execute('SELECT full_link, expiry_date FROM vpn_keys WHERE key_value = ?', (key,))
             data = cursor.fetchone()
             conn.close()
             
             if data:
-                client_id = data['client_id']
+                client_id = key  # Не нужно, используем full_link
                 add_client_to_xray(client_id, f"paid_{key}")
-                
-                link = f"vless://{client_id}@{SERVER_IP}:{SERVER_PORT}?security=none&type=tcp#{key}"
                 
                 bot.send_message(user_id,
                                f"✅ **ОПЛАЧЕНО!**\n\n"
-                               f"🔑 Ключ: `{key}`\n"
-                               f"🔗 `{link}`\n\n"
+                               f"🔗 `{data['full_link']}`\n\n"
                                f"📅 Действует до: {format_datetime(datetime.fromisoformat(data['expiry_date']))}",
                                parse_mode='Markdown', reply_markup=main_menu())
             
@@ -509,7 +495,7 @@ def handle_callback(call):
         conn = get_db()
         cursor = conn.cursor()
         cursor.execute('''
-        SELECT key_value, expiry_date, is_paid, plan_name, device_id, blocked 
+        SELECT full_link, expiry_date, is_paid, plan_name, device_id, blocked 
         FROM vpn_keys WHERE telegram_id = ? ORDER BY created_at DESC
         ''', (str(user_id),))
         keys = cursor.fetchall()
@@ -532,8 +518,11 @@ def handle_callback(call):
                 
                 expiry = datetime.fromisoformat(k['expiry_date']).strftime('%d.%m.%Y')
                 plan_name = PLANS.get(k['plan_name'], {}).get('name', 'VPN') if k['plan_name'] else 'VPN'
-                text += f"{status} `{k['key_value']}`\n"
-                text += f"   📅 до {expiry} | {plan_name}\n\n"
+                
+                # Показываем полную ссылку
+                text += f"{status} **{plan_name}**\n"
+                text += f"🔗 `{k['full_link']}`\n"
+                text += f"📅 до {expiry}\n\n"
         
         bot.edit_message_text(text, 
                              chat_id=call.message.chat.id,
@@ -550,20 +539,21 @@ def handle_callback(call):
         client_id, key = generate_key()
         expiry = datetime.now() + timedelta(days=30)
         
+        # Формируем полную ссылку
+        link = f"vless://{client_id}@{SERVER_IP}:{SERVER_PORT}?security=none&type=tcp#{key}"
+        
         conn = get_db()
         cursor = conn.cursor()
         cursor.execute('''
-        INSERT INTO vpn_keys (key_value, client_id, expiry_date, telegram_id, is_paid, is_free)
-        VALUES (?, ?, ?, ?, ?, ?)
-        ''', (key, client_id, expiry.isoformat(), str(user_id), 1, 1))
+        INSERT INTO vpn_keys (key_value, client_id, full_link, expiry_date, telegram_id, is_paid, is_free)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ''', (key, client_id, link, expiry.isoformat(), str(user_id), 1, 1))
         conn.commit()
         conn.close()
         
         add_client_to_xray(client_id, f"admin_free_{key}")
         
-        link = f"vless://{client_id}@{SERVER_IP}:{SERVER_PORT}?security=none&type=tcp#{key}"
-        
-        bot.edit_message_text(f"✅ **Бесплатный ключ:**\n\n`{key}`\n\n🔗 `{link}`", 
+        bot.edit_message_text(f"✅ **Бесплатный ключ:**\n\n🔗 `{link}`", 
                              chat_id=call.message.chat.id,
                              message_id=call.message.message_id,
                              parse_mode='Markdown',
@@ -642,7 +632,7 @@ def my_keys(message):
     conn = get_db()
     cursor = conn.cursor()
     cursor.execute('''
-    SELECT key_value, expiry_date, is_paid, plan_name, device_id, blocked 
+    SELECT full_link, expiry_date, is_paid, plan_name, device_id, blocked 
     FROM vpn_keys WHERE telegram_id = ? ORDER BY created_at DESC
     ''', (str(user_id),))
     keys = cursor.fetchall()
@@ -665,8 +655,11 @@ def my_keys(message):
             
             expiry = datetime.fromisoformat(k['expiry_date']).strftime('%d.%m.%Y')
             plan_name = PLANS.get(k['plan_name'], {}).get('name', 'VPN') if k['plan_name'] else 'VPN'
-            text += f"{status} `{k['key_value']}`\n"
-            text += f"   📅 до {expiry} | {plan_name}\n\n"
+            
+            # Показываем полную ссылку
+            text += f"{status} **{plan_name}**\n"
+            text += f"🔗 `{k['full_link']}`\n"
+            text += f"📅 до {expiry}\n\n"
     
     bot.send_message(message.chat.id, text, parse_mode='Markdown', reply_markup=back_menu())
 
@@ -677,7 +670,7 @@ def get_key_info(message):
         conn = get_db()
         cursor = conn.cursor()
         cursor.execute('''
-        SELECT key_value, created_at, expiry_date, is_paid, payment_time, plan_name, device_id, blocked 
+        SELECT key_value, full_link, created_at, expiry_date, is_paid, payment_time, plan_name, device_id, blocked 
         FROM vpn_keys WHERE key_value = ?
         ''', (key,))
         data = cursor.fetchone()
@@ -687,7 +680,8 @@ def get_key_info(message):
             bot.reply_to(message, "❌ Ключ не найден")
             return
         
-        msg = f"🔑 **Информация о ключе**\n\n`{data['key_value']}`\n\n"
+        msg = f"🔑 **Информация о ключе**\n\n"
+        msg += f"🔗 `{data['full_link']}`\n\n"
         msg += f"📅 **Создан:** {format_datetime(datetime.fromisoformat(data['created_at']))}\n"
         msg += f"📆 **Действует до:** {format_datetime(datetime.fromisoformat(data['expiry_date']))}\n"
         
@@ -711,7 +705,7 @@ def get_key_info(message):
 
 if __name__ == "__main__":
     print("=" * 60)
-    print("🤖 VPN БОТ С ТЕХПОДДЕРЖКОЙ")
+    print("🤖 VPN БОТ С ПОЛНЫМИ ССЫЛКАМИ")
     print("=" * 60)
     print(f"👤 Админ ID: {ADMIN_ID}")
     print(f"👥 Группа поддержки: {SUPPORT_GROUP_ID}")
