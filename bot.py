@@ -20,7 +20,7 @@ PRICE_USDT = 1.50
 ORDER_LIFETIME = 10
 ADMIN_ID = 1684751552
 CRYPTO_API_TOKEN = "540507:AAyXFAZkerRA5kUrrlOmNHs1mV4xZuBZKeO"
-BOT_USERNAME = "vpnconnecting_bost"
+BOT_USERNAME = "vpnconnecting_bot"
 
 # API для добавления клиентов в Xray (на порту 5001)
 XRAY_API_URL = "http://95.81.102.13:5001/add_client"
@@ -226,7 +226,8 @@ def handle_callback(call):
         # Добавляем в Xray через API
         add_client_to_xray(client_id, f"admin_free_{key}")
         
-        link = f"vless://{client_id}@{SERVER_IP}:{SERVER_PORT}?security=none&type=tcp&headerType=http&host=www.google.com#{key}"
+        # 👇 ИСПРАВЛЕННАЯ ССЫЛКА (БЕЗ HTTP)
+        link = f"vless://{client_id}@{SERVER_IP}:{SERVER_PORT}?security=none&type=tcp#{key}"
         
         bot.edit_message_text(f"✅ **Бесплатный ключ:** `{key}`\n🔗 `{link}`", 
                              chat_id=call.message.chat.id, message_id=call.message.message_id,
@@ -312,7 +313,8 @@ def handle_callback(call):
                 ''', (datetime.now().isoformat(), key))
                 conn.commit()
                 
-                link = f"vless://{client_id}@{SERVER_IP}:{SERVER_PORT}?security=none&type=tcp&headerType=http&host=www.google.com#{key}"
+                # 👇 ИСПРАВЛЕННАЯ ССЫЛКА (БЕЗ HTTP)
+                link = f"vless://{client_id}@{SERVER_IP}:{SERVER_PORT}?security=none&type=tcp#{key}"
                 
                 bot.send_message(user_id,
                                f"✅ **ОПЛАЧЕНО!**\n🔗 `{link}`",
@@ -377,7 +379,7 @@ def get_key_info(message):
 
 if __name__ == "__main__":
     print("=" * 60)
-    print("🤖 VPN БОТ С XRAY API НА ПОРТУ 5001")
+    print("🤖 VPN БОТ С XRAY API (БЕЗ HTTP-МАСКИРОВКИ)")
     print("=" * 60)
     print(f"💰 Цена: {PRICE_USDT} USDT")
     print(f"👤 Админ ID: {ADMIN_ID}")
