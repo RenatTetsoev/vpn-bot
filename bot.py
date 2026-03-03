@@ -25,9 +25,8 @@ BOT_USERNAME = "vpnconnecting_bot"
 XRAY_API_URL = "http://95.81.102.13:5001/add_client"
 XRAY_CHECK_URL = "http://95.81.102.13:5001/check_device"
 
+# ========== ТАРИФЫ И ЦЕНЫ ==========
 PLANS = {
-    "7days": {"days": 7, "price_rub": 30, "price_usdt": 0, "name": "🗓 7 дней"},
-    "15days": {"days": 15, "price_rub": 60, "price_usdt": 0, "name": "🗓 15 дней"},
     "30days": {"days": 30, "price_rub": 100, "price_usdt": 1.50, "name": "📅 1 месяц"},
     "90days": {"days": 90, "price_rub": 250, "price_usdt": 3.30, "name": "📅 3 месяца"},
     "180days": {"days": 180, "price_rub": 500, "price_usdt": 6.50, "name": "📅 6 месяцев"},
@@ -147,8 +146,6 @@ def main_menu():
 def plans_menu():
     keyboard = InlineKeyboardMarkup(row_width=2)
     keyboard.add(
-        InlineKeyboardButton("🗓 7 дней - 30₽", callback_data="plan_7days"),
-        InlineKeyboardButton("🗓 15 дней - 60₽", callback_data="plan_15days"),
         InlineKeyboardButton("📅 1 месяц - 100₽", callback_data="plan_30days"),
         InlineKeyboardButton("📅 3 месяца - 250₽", callback_data="plan_90days"),
         InlineKeyboardButton("📅 6 месяцев - 500₽", callback_data="plan_180days"),
@@ -222,31 +219,52 @@ def handle_support_message(message):
         bot.send_message(SUPPORT_GROUP_ID, user_info, parse_mode='Markdown')
         bot.reply_to(message, "✅ Ваше сообщение отправлено в техподдержку. Ожидайте ответа.")
 
+# ========== ИСПРАВЛЕННАЯ КОМАНДА /reply ==========
 @bot.message_handler(commands=['reply'])
 def admin_reply(message):
+    # Проверяем, что сообщение из группы поддержки
     if message.chat.id != SUPPORT_GROUP_ID:
         return
+    
+    # Проверяем, что отправитель - админ
     if message.from_user.id != ADMIN_ID:
         bot.reply_to(message, "❌ У вас нет прав администратора")
         return
+    
     try:
+        # Разбираем сообщение: /reply 123456789 Текст сообщения
         parts = message.text.split(maxsplit=2)
+        
         if len(parts) < 3:
-            bot.reply_to(message, "❌ **Используйте:** `/reply USER_ID ТЕКСТ`\n\n"
-                                  "Например: `/reply 123456789 Ваш ключ активирован`", 
-                                  parse_mode='Markdown')
+            bot.reply_to(message, 
+                        "❌ **Неправильный формат!**\n\n"
+                        "Используйте: `/reply USER_ID ТЕКСТ`\n"
+                        "Например: `/reply 123456789 Ваш ключ активирован`", 
+                        parse_mode='Markdown')
             return
-        user_id = int(parts[1])
+        
+        # Получаем ID пользователя и текст ответа
+        user_id_str = parts[1]
         reply_text = parts[2]
+        
+        # Проверяем, что ID состоит только из цифр
+        if not user_id_str.isdigit():
+            bot.reply_to(message, "❌ USER_ID должен быть числом")
+            return
+        
+        user_id = int(user_id_str)
+        
+        # Отправляем ответ пользователю
         bot.send_message(user_id, 
                         f"📨 **Ответ от поддержки:**\n\n{reply_text}\n\n"
-                        f"*Если у вас остались вопросы, напишите снова.*", 
+                        f"_Если у вас остались вопросы, напишите снова._", 
                         parse_mode='Markdown')
+        
+        # Подтверждение админу в группу
         bot.reply_to(message, f"✅ **Ответ отправлен** пользователю `{user_id}`", parse_mode='Markdown')
-    except ValueError:
-        bot.reply_to(message, "❌ **Ошибка:** USER_ID должен быть числом", parse_mode='Markdown')
+        
     except Exception as e:
-        bot.reply_to(message, f"❌ **Ошибка:** {e}", parse_mode='Markdown')
+        bot.reply_to(message, f"❌ **Ошибка:** {str(e)}", parse_mode='Markdown')
 
 @bot.message_handler(commands=['support'])
 def support_command(message):
@@ -654,7 +672,7 @@ def get_key_info(message):
 
 if __name__ == "__main__":
     print("=" * 60)
-    print("🤖 VPN БОТ С ПОЛНЫМИ ССЫЛКАМИ")
+    print("🤖 VPN БОТ (ТОЛЬКО 1,3,6,12 МЕСЯЦЕВ)")
     print("=" * 60)
     print(f"👤 Админ ID: {ADMIN_ID}")
     print(f"👥 Группа поддержки: {SUPPORT_GROUP_ID}")
