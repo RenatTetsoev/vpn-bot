@@ -27,6 +27,8 @@ XRAY_CHECK_URL = "http://95.81.102.13:5001/check_device"
 
 # ========== ТАРИФЫ И ЦЕНЫ ==========
 PLANS = {
+    "7days": {"days": 7, "price_rub": 30, "price_usdt": 0.45, "name": "🗓 7 дней"},
+    "15days": {"days": 15, "price_rub": 60, "price_usdt": 0.90, "name": "🗓 15 дней"},
     "30days": {"days": 30, "price_rub": 100, "price_usdt": 1.50, "name": "📅 1 месяц"},
     "90days": {"days": 90, "price_rub": 250, "price_usdt": 3.30, "name": "📅 3 месяца"},
     "180days": {"days": 180, "price_rub": 500, "price_usdt": 6.50, "name": "📅 6 месяцев"},
@@ -146,6 +148,8 @@ def main_menu():
 def plans_menu():
     keyboard = InlineKeyboardMarkup(row_width=2)
     keyboard.add(
+        InlineKeyboardButton("🗓 7 дней - 30₽", callback_data="plan_7days"),
+        InlineKeyboardButton("🗓 15 дней - 60₽", callback_data="plan_15days"),
         InlineKeyboardButton("📅 1 месяц - 100₽", callback_data="plan_30days"),
         InlineKeyboardButton("📅 3 месяца - 250₽", callback_data="plan_90days"),
         InlineKeyboardButton("📅 6 месяцев - 500₽", callback_data="plan_180days"),
@@ -224,6 +228,7 @@ def handle_support_message(message):
 def admin_reply(message):
     # Проверяем, что сообщение из группы поддержки
     if message.chat.id != SUPPORT_GROUP_ID:
+        bot.reply_to(message, "❌ Эта команда работает только в группе поддержки")
         return
     
     # Проверяем, что отправитель - админ
@@ -255,13 +260,17 @@ def admin_reply(message):
         user_id = int(user_id_str)
         
         # Отправляем ответ пользователю
-        bot.send_message(user_id, 
+        sent_message = bot.send_message(user_id, 
                         f"📨 **Ответ от поддержки:**\n\n{reply_text}\n\n"
                         f"_Если у вас остались вопросы, напишите снова._", 
                         parse_mode='Markdown')
         
-        # Подтверждение админу в группу
-        bot.reply_to(message, f"✅ **Ответ отправлен** пользователю `{user_id}`", parse_mode='Markdown')
+        # Проверяем, отправилось ли сообщение
+        if sent_message:
+            # Подтверждение админу в группу
+            bot.reply_to(message, f"✅ **Ответ отправлен** пользователю `{user_id}`", parse_mode='Markdown')
+        else:
+            bot.reply_to(message, f"❌ Не удалось отправить сообщение пользователю `{user_id}`. Возможно, он заблокировал бота.", parse_mode='Markdown')
         
     except Exception as e:
         bot.reply_to(message, f"❌ **Ошибка:** {str(e)}", parse_mode='Markdown')
@@ -672,7 +681,7 @@ def get_key_info(message):
 
 if __name__ == "__main__":
     print("=" * 60)
-    print("🤖 VPN БОТ (ТОЛЬКО 1,3,6,12 МЕСЯЦЕВ)")
+    print("🤖 VPN БОТ (ПОЛНАЯ ВЕРСИЯ С USDT)")
     print("=" * 60)
     print(f"👤 Админ ID: {ADMIN_ID}")
     print(f"👥 Группа поддержки: {SUPPORT_GROUP_ID}")
