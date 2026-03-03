@@ -27,8 +27,6 @@ XRAY_CHECK_URL = "http://95.81.102.13:5001/check_device"
 
 # ========== ТАРИФЫ И ЦЕНЫ ==========
 PLANS = {
-    "7days": {"days": 7, "price_rub": 30, "price_usdt": 0.45, "name": "🗓 7 дней"},
-    "15days": {"days": 15, "price_rub": 60, "price_usdt": 0.90, "name": "🗓 15 дней"},
     "30days": {"days": 30, "price_rub": 100, "price_usdt": 1.50, "name": "📅 1 месяц"},
     "90days": {"days": 90, "price_rub": 250, "price_usdt": 3.30, "name": "📅 3 месяца"},
     "180days": {"days": 180, "price_rub": 500, "price_usdt": 6.50, "name": "📅 6 месяцев"},
@@ -148,8 +146,6 @@ def main_menu():
 def plans_menu():
     keyboard = InlineKeyboardMarkup(row_width=2)
     keyboard.add(
-        InlineKeyboardButton("🗓 7 дней - 30₽", callback_data="plan_7days"),
-        InlineKeyboardButton("🗓 15 дней - 60₽", callback_data="plan_15days"),
         InlineKeyboardButton("📅 1 месяц - 100₽", callback_data="plan_30days"),
         InlineKeyboardButton("📅 3 месяца - 250₽", callback_data="plan_90days"),
         InlineKeyboardButton("📅 6 месяцев - 500₽", callback_data="plan_180days"),
@@ -371,6 +367,7 @@ def handle_callback(call):
     elif data.startswith("plan_"):
         plan_id = data.replace("plan_", "")
         if plan_id in PLANS:
+            # СТАРЫЙ БОЛЬШОЙ ТЕКСТ ПРЕДУПРЕЖДЕНИЯ
             bot.edit_message_text("⚠️ **ПРАВИЛА ИСПОЛЬЗОВАНИЯ**\n\n"
                                   "❗️ Вы берете на себя всю ответственность за использование данного VPN.\n\n"
                                   "• Разработчик бота и сервиса не несет ответственности за ваши действия\n"
@@ -381,14 +378,27 @@ def handle_callback(call):
                                  message_id=call.message.message_id,
                                  parse_mode='Markdown',
                                  reply_markup=confirm_menu())
+            # Сохраняем выбранный план для использования после подтверждения
+            # Временно сохраняем в данных колбэка
+            call.data = f"confirm_plan_{plan_id}"
+            bot.answer_callback_query(call.id)
+
+    elif data.startswith("confirm_plan_"):
+        plan_id = data.replace("confirm_plan_", "")
+        if plan_id in PLANS:
+            plan = PLANS[plan_id]
+            # Показываем способы оплаты
+            bot.edit_message_text(f"💳 **{plan['name']}**\n\n"
+                                  f"💰 Цена: {plan['price_rub']}₽ / {plan['price_usdt']} USDT\n\n"
+                                  f"Выберите способ оплаты:",
+                                 chat_id=call.message.chat.id,
+                                 message_id=call.message.message_id,
+                                 parse_mode='Markdown',
+                                 reply_markup=payment_methods_menu(plan_id, plan))
             bot.answer_callback_query(call.id)
 
     elif data == "accept_rules":
-        bot.edit_message_text("📋 **Выберите тариф:**", 
-                             chat_id=call.message.chat.id,
-                             message_id=call.message.message_id,
-                             parse_mode='Markdown',
-                             reply_markup=plans_menu())
+        # Это больше не нужно, так как мы используем confirm_plan_
         bot.answer_callback_query(call.id)
 
     elif data.startswith("pay_crypto_"):
@@ -681,7 +691,7 @@ def get_key_info(message):
 
 if __name__ == "__main__":
     print("=" * 60)
-    print("🤖 VPN БОТ (ПОЛНАЯ ВЕРСИЯ С USDT)")
+    print("🤖 VPN БОТ (1,3,6,12 МЕСЯЦЕВ)")
     print("=" * 60)
     print(f"👤 Админ ID: {ADMIN_ID}")
     print(f"👥 Группа поддержки: {SUPPORT_GROUP_ID}")
