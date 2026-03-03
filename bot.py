@@ -18,15 +18,13 @@ bot = telebot.TeleBot(TOKEN)
 SERVER_IP = "95.81.102.13"
 SERVER_PORT = 443
 ADMIN_ID = 1684751552
-SUPPORT_GROUP_ID = -1003839964720  # Твоя группа для техподдержки
+SUPPORT_GROUP_ID = -1003839964720
 CRYPTO_API_TOKEN = "540507:AAyXFAZkerRA5kUrrlOmNHs1mV4xZuBZKeO"
 BOT_USERNAME = "vpnconnecting_bot"
 
-# API для добавления клиентов в Xray (на порту 5001)
 XRAY_API_URL = "http://95.81.102.13:5001/add_client"
 XRAY_CHECK_URL = "http://95.81.102.13:5001/check_device"
 
-# ========== ТАРИФЫ И ЦЕНЫ ==========
 PLANS = {
     "7days": {"days": 7, "price_rub": 30, "price_usdt": 0, "name": "🗓 7 дней"},
     "15days": {"days": 15, "price_rub": 60, "price_usdt": 0, "name": "🗓 15 дней"},
@@ -36,13 +34,10 @@ PLANS = {
     "365days": {"days": 365, "price_rub": 1000, "price_usdt": 13.00, "name": "📅 12 месяцев"}
 }
 
-# Для ЮKassa (заполнишь позже)
-YOOKASSA_SHOP_ID = ""  # Вставь сюда shop_id
-YOOKASSA_SECRET_KEY = ""  # Вставь сюда секретный ключ
+YOOKASSA_SHOP_ID = ""
+YOOKASSA_SECRET_KEY = ""
 
-# ========== ФУНКЦИИ ==========
 def add_client_to_xray(client_id, email):
-    """Добавляет клиента в Xray через внешний API"""
     try:
         response = requests.post(XRAY_API_URL, 
                                 json={'client_id': client_id, 'email': email},
@@ -71,7 +66,7 @@ def init_db():
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         key_value TEXT UNIQUE NOT NULL,
         client_id TEXT UNIQUE NOT NULL,
-        full_link TEXT,  # Добавлено поле для полной ссылки
+        full_link TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         expiry_date DATETIME,
         is_paid BOOLEAN DEFAULT 0,
@@ -101,7 +96,6 @@ def format_datetime(dt):
     return dt.strftime('%d.%m.%Y %H:%M:%S')
 
 def create_crypto_invoice(amount, description):
-    """Создает счет в CryptoBot"""
     try:
         url = "https://pay.crypt.bot/api/createInvoice"
         headers = {
@@ -127,7 +121,6 @@ def create_crypto_invoice(amount, description):
         return None, None
 
 def check_invoice_status(invoice_id):
-    """Проверяет статус счета в CryptoBot"""
     try:
         url = "https://pay.crypt.bot/api/getInvoices"
         headers = {"Crypto-Pay-API-Token": CRYPTO_API_TOKEN}
@@ -140,7 +133,6 @@ def check_invoice_status(invoice_id):
     except:
         return False
 
-# ========== КНОПКИ ==========
 def main_menu():
     keyboard = InlineKeyboardMarkup(row_width=1)
     keyboard.add(
@@ -197,13 +189,10 @@ def confirm_menu():
     )
     return keyboard
 
-# ========== ТЕХПОДДЕРЖКА ==========
 @bot.message_handler(commands=['start'])
 def start(message):
-    # Проверяем, не из группы ли это сообщение
     if message.chat.id == SUPPORT_GROUP_ID:
-        return  # Игнорируем сообщения из группы
-    
+        return
     bot.send_message(message.chat.id,
         "🔐 **VPN CONNECTING**\n\n"
         "⚡️ Высокоскоростной VPN\n"
@@ -219,80 +208,55 @@ def admin_panel(message):
         return
     bot.send_message(message.chat.id, "🔐 **АДМИН-ПАНЕЛЬ**", parse_mode='Markdown', reply_markup=admin_menu())
 
-# ========== ОБРАБОТКА СООБЩЕНИЙ В ТЕХПОДДЕРЖКУ ==========
 @bot.message_handler(func=lambda message: True)
 def handle_support_message(message):
-    # Игнорируем команды
     if message.text and message.text.startswith('/'):
         return
-    
-    # Если сообщение из лички - пересылаем в группу поддержки
     if message.chat.type == 'private':
-        # Пересылаем сообщение в группу
         bot.forward_message(SUPPORT_GROUP_ID, message.chat.id, message.message_id)
-        
-        # Отправляем информацию о пользователе
         user_info = f"🆔 **ID:** {message.from_user.id}\n"
         user_info += f"👤 **Имя:** {message.from_user.first_name}\n"
         if message.from_user.username:
             user_info += f"📱 **Username:** @{message.from_user.username}\n"
         user_info += f"📝 **Сообщение:** {message.text}"
-        
         bot.send_message(SUPPORT_GROUP_ID, user_info, parse_mode='Markdown')
-        
-        # Подтверждение пользователю
         bot.reply_to(message, "✅ Ваше сообщение отправлено в техподдержку. Ожидайте ответа.")
 
-# ========== ОТВЕТ ОТ АДМИНА ==========
 @bot.message_handler(commands=['reply'])
 def admin_reply(message):
-    # Проверяем, что сообщение из группы поддержки
     if message.chat.id != SUPPORT_GROUP_ID:
         return
-    
-    # Проверяем, что отправитель - админ
     if message.from_user.id != ADMIN_ID:
         bot.reply_to(message, "❌ У вас нет прав администратора")
         return
-    
     try:
-        # Формат: /reply user_id текст сообщения
         parts = message.text.split(maxsplit=2)
         if len(parts) < 3:
             bot.reply_to(message, "❌ **Используйте:** `/reply USER_ID ТЕКСТ`\n\n"
                                   "Например: `/reply 123456789 Ваш ключ активирован`", 
                                   parse_mode='Markdown')
             return
-        
         user_id = int(parts[1])
         reply_text = parts[2]
-        
-        # Отправляем ответ пользователю
         bot.send_message(user_id, 
                         f"📨 **Ответ от поддержки:**\n\n{reply_text}\n\n"
                         f"*Если у вас остались вопросы, напишите снова.*", 
                         parse_mode='Markdown')
-        
-        # Подтверждение админу в группу
         bot.reply_to(message, f"✅ **Ответ отправлен** пользователю `{user_id}`", parse_mode='Markdown')
-        
     except ValueError:
         bot.reply_to(message, "❌ **Ошибка:** USER_ID должен быть числом", parse_mode='Markdown')
     except Exception as e:
         bot.reply_to(message, f"❌ **Ошибка:** {e}", parse_mode='Markdown')
 
-# ========== КОМАНДА ДЛЯ ТЕСТА ОТВЕТА ==========
 @bot.message_handler(commands=['support'])
 def support_command(message):
     if message.chat.id == SUPPORT_GROUP_ID:
         return
-    
     bot.reply_to(message, 
                 "🆘 **Техподдержка**\n\n"
                 "Напишите ваш вопрос, и мы ответим в ближайшее время.",
                 parse_mode='Markdown')
 
-# ========== ОБРАБОТЧИК КНОПОК ==========
 @bot.callback_query_handler(func=lambda call: True)
 def handle_callback(call):
     user_id = call.from_user.id
@@ -336,7 +300,6 @@ def handle_callback(call):
         bot.answer_callback_query(call.id)
 
     elif data == "get_free_key":
-        # Проверяем, получал ли пользователь уже бесплатный ключ
         conn = get_db()
         cursor = conn.cursor()
         cursor.execute('''
@@ -358,8 +321,6 @@ def handle_callback(call):
         
         client_id, key = generate_key()
         expiry = datetime.now() + timedelta(days=3)
-        
-        # Формируем полную ссылку
         link = f"vless://{client_id}@{SERVER_IP}:{SERVER_PORT}?security=none&type=tcp#{key}"
         
         cursor.execute('''
@@ -381,10 +342,8 @@ def handle_callback(call):
         bot.answer_callback_query(call.id, "Ключ создан!")
 
     elif data.startswith("plan_"):
-        # Выбор тарифа
         plan_id = data.replace("plan_", "")
         if plan_id in PLANS:
-            # Сначала показываем правила
             bot.edit_message_text("⚠️ **ПРАВИЛА ИСПОЛЬЗОВАНИЯ**\n\n"
                                   "❗️ Вы берете на себя всю ответственность за использование данного VPN.\n\n"
                                   "• Разработчик бота и сервиса не несет ответственности за ваши действия\n"
@@ -395,13 +354,9 @@ def handle_callback(call):
                                  message_id=call.message.message_id,
                                  parse_mode='Markdown',
                                  reply_markup=confirm_menu())
-            # Сохраняем выбранный план в данных колбэка
             bot.answer_callback_query(call.id)
-            # В реальном коде нужно сохранять выбранный план, например во временном словаре
-            # Для простоты в этом примере используем прямой переход после подтверждения
 
     elif data == "accept_rules":
-        # Возвращаемся к выбору тарифа
         bot.edit_message_text("📋 **Выберите тариф:**", 
                              chat_id=call.message.chat.id,
                              message_id=call.message.message_id,
@@ -415,8 +370,6 @@ def handle_callback(call):
         
         client_id, key = generate_key()
         expiry = datetime.now() + timedelta(days=plan["days"])
-        
-        # Формируем полную ссылку
         link = f"vless://{client_id}@{SERVER_IP}:{SERVER_PORT}?security=none&type=tcp#{key}"
         
         invoice_id, pay_url = create_crypto_invoice(plan["price_usdt"], f"{plan['name']} ключ {key}")
@@ -471,7 +424,7 @@ def handle_callback(call):
             conn.close()
             
             if data:
-                client_id = key  # Не нужно, используем full_link
+                client_id = key
                 add_client_to_xray(client_id, f"paid_{key}")
                 
                 bot.send_message(user_id,
@@ -519,7 +472,6 @@ def handle_callback(call):
                 expiry = datetime.fromisoformat(k['expiry_date']).strftime('%d.%m.%Y')
                 plan_name = PLANS.get(k['plan_name'], {}).get('name', 'VPN') if k['plan_name'] else 'VPN'
                 
-                # Показываем полную ссылку
                 text += f"{status} **{plan_name}**\n"
                 text += f"🔗 `{k['full_link']}`\n"
                 text += f"📅 до {expiry}\n\n"
@@ -538,8 +490,6 @@ def handle_callback(call):
         
         client_id, key = generate_key()
         expiry = datetime.now() + timedelta(days=30)
-        
-        # Формируем полную ссылку
         link = f"vless://{client_id}@{SERVER_IP}:{SERVER_PORT}?security=none&type=tcp#{key}"
         
         conn = get_db()
@@ -656,7 +606,6 @@ def my_keys(message):
             expiry = datetime.fromisoformat(k['expiry_date']).strftime('%d.%m.%Y')
             plan_name = PLANS.get(k['plan_name'], {}).get('name', 'VPN') if k['plan_name'] else 'VPN'
             
-            # Показываем полную ссылку
             text += f"{status} **{plan_name}**\n"
             text += f"🔗 `{k['full_link']}`\n"
             text += f"📅 до {expiry}\n\n"
