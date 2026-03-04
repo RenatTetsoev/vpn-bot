@@ -7,7 +7,6 @@ import json
 import threading
 import time
 import requests
-import subprocess
 from datetime import datetime, timedelta
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
@@ -33,18 +32,43 @@ PLANS = {
     "365days": {"days": 365, "price_rub": 1000, "price_usdt": 13.00, "name": "📅 12 месяцев"}
 }
 
+# ЮKassa (можно оставить пустыми если не используется)
 YOOKASSA_SHOP_ID = ""
 YOOKASSA_SECRET_KEY = ""
 
+DB_PATH = '/opt/vpnproxybot/vpn_database.db'
+
 # ========== ФУНКЦИИ ДЛЯ РАБОТЫ С XRAY ==========
-def add_client_to_xray(client_id, email):
+def is_uuid(val):
+    """Проверка, является ли строка UUID"""
     try:
+        uuid.UUID(str(val))
+        return True
+    except ValueError:
+        return False
+
+def add_client_to_xray(client_id, email):
+    """Добавление клиента в Xray"""
+    try:
+        # Если передан ключ доступа, а не UUID
+        if not is_uuid(client_id):
+            conn = get_db()
+            cursor = conn.cursor()
+            cursor.execute('SELECT client_id FROM vpn_keys WHERE key_value = ?', (client_id,))
+            result = cursor.fetchone()
+            conn.close()
+            if result:
+                client_id = result['client_id']
+            else:
+                print(f"❌ Не найден client_id для ключа {client_id}")
+                return False
+        
         response = requests.post(XRAY_API_URL, 
                                 json={'client_id': client_id, 'email': email},
                                 timeout=5)
         result = response.json()
         if result.get('success'):
-            print(f"✅ Клиент {client_id} добавлен в Xray через API")
+            print(f"✅ Клиент {client_id} добавлен в Xray")
             return True
         else:
             print(f"❌ Ошибка API: {result.get('error')}")
@@ -53,38 +77,12 @@ def add_client_to_xray(client_id, email):
         print(f"❌ Ошибка соединения с API: {e}")
         return False
 
-# ========== БАЗА ДАННЫХ (ПРЯМОЕ ПОДКЛЮЧЕНИЕ) ==========
+# ========== БАЗА ДАННЫХ ==========
 def get_db():
-    conn = sqlite3.connect('vpn_database.db')
+    """Подключение к существующей базе данных"""
+    conn = sqlite3.connect(DB_PATH, timeout=10)
     conn.row_factory = sqlite3.Row
     return conn
-
-def init_db():
-    conn = get_db()
-    cursor = conn.cursor()
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS vpn_keys (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        key_value TEXT UNIQUE NOT NULL,
-        client_id TEXT UNIQUE NOT NULL,
-        full_link TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        expiry_date DATETIME,
-        is_paid BOOLEAN DEFAULT 0,
-        payment_time DATETIME,
-        telegram_id TEXT,
-        invoice_id TEXT UNIQUE,
-        is_free BOOLEAN DEFAULT 0,
-        device_id TEXT,
-        plan_name TEXT,
-        blocked BOOLEAN DEFAULT 0
-    )
-    ''')
-    conn.commit()
-    conn.close()
-    print("✅ База данных готова")
-
-init_db()
 
 def get_user_keys(telegram_id):
     conn = get_db()
@@ -180,9 +178,14 @@ def get_admin_stats():
 
 # ========== ОСТАЛЬНЫЕ ФУНКЦИИ ==========
 def generate_key():
+    """Генерация ключа с полными параметрами для обхода блокировок"""
     client_id = str(uuid.uuid4())
     access_key = 'VPN-' + ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
-    return client_id, access_key
+    
+    # Всегда добавляем headerType и host для корректной работы
+    link = f"vless://{client_id}@{SERVER_IP}:{SERVER_PORT}?security=none&type=tcp&headerType=http&host=www.google.com#{access_key}"
+    
+    return client_id, access_key, link
 
 def format_datetime(dt):
     return dt.strftime('%d.%m.%Y %H:%M:%S')
@@ -288,6 +291,16 @@ def confirm_menu(plan_id=None):
         )
     return keyboard
 
+def payment_menu(key, pay_url):
+    keyboard = InlineKeyboardMarkup(row_width=1)
+    keyboard.add(
+        InlineKeyboardButton("💳 Оплатить", url=pay_url),
+        InlineKeyboardButton("✅ Проверить оплату", callback_data=f"check_payment_{key}"),
+        InlineKeyboardButton("❌ Отменить", callback_data="cancel_order"),
+        InlineKeyboardButton("🏠 Главное меню", callback_data="main_menu")
+    )
+    return keyboard
+
 # ========== ТЕХПОДДЕРЖКА ==========
 @bot.message_handler(commands=['start'])
 def start(message):
@@ -357,6 +370,69 @@ def support_command(message):
                 "Напишите ваш вопрос, и мы ответим в ближайшее время.",
                 parse_mode='Markdown')
 
+@bot.message_handler(commands=['mykeys'])
+def my_keys(message):
+    user_id = message.from_user.id
+    keys = get_user_keys(user_id)
+    
+    if not keys:
+        text = "🔑 **Ваши ключи**\n\nУ вас пока нет ключей."
+    else:
+        text = "🔑 **Ваши ключи**\n\n"
+        for k in keys:
+            if k['blocked']:
+                status = "❌ ЗАБЛОКИРОВАН"
+            elif k['is_paid']:
+                status = "✅"
+            else:
+                status = "⏳"
+            
+            if k['device_id'] and not k['blocked']:
+                status += f" 📱 (устр: {k['device_id'][:8]}...)"
+            
+            expiry = datetime.fromisoformat(k['expiry_date']).strftime('%d.%m.%Y')
+            plan_name = PLANS.get(k['plan_name'], {}).get('name', 'VPN') if k['plan_name'] else 'VPN'
+            
+            text += f"{status} **{plan_name}**\n"
+            text += f"🔗 `{k['full_link']}`\n"
+            text += f"📅 до {expiry}\n\n"
+    
+    bot.send_message(message.chat.id, text, parse_mode='Markdown', reply_markup=back_menu())
+
+@bot.message_handler(commands=['getkeyinfo'])
+def get_key_info(message):
+    try:
+        key = message.text.split()[1]
+        result = get_key_info(key)
+        
+        if not result['success']:
+            bot.reply_to(message, "❌ Ключ не найден")
+            return
+        
+        data = result['key_info']
+        msg = f"🔑 **Информация о ключе**\n\n"
+        msg += f"🔗 `{data['full_link']}`\n\n"
+        msg += f"📅 **Создан:** {format_datetime(datetime.fromisoformat(data['created_at']))}\n"
+        msg += f"📆 **Действует до:** {format_datetime(datetime.fromisoformat(data['expiry_date']))}\n"
+        
+        if data['blocked']:
+            msg += f"❌ **Статус:** ЗАБЛОКИРОВАН\n"
+        elif data['is_paid']:
+            msg += f"✅ **Оплачен:** {format_datetime(datetime.fromisoformat(data['payment_time']))}\n"
+        else:
+            msg += f"⏳ **Статус:** Ожидает оплаты\n"
+        
+        if data['plan_name']:
+            plan_name = PLANS.get(data['plan_name'], {}).get('name', data['plan_name'])
+            msg += f"📋 **Тариф:** {plan_name}\n"
+        
+        if data['device_id']:
+            msg += f"📱 **Привязан к устройству:** `{data['device_id']}`\n"
+        
+        bot.reply_to(message, msg, parse_mode='Markdown', reply_markup=back_menu())
+    except Exception as e:
+        bot.reply_to(message, f"❌ Ошибка: {e}")
+
 # ========== ОБРАБОТЧИК КНОПОК ==========
 @bot.callback_query_handler(func=lambda call: True)
 def handle_callback(call):
@@ -412,9 +488,8 @@ def handle_callback(call):
             bot.answer_callback_query(call.id, "Уже получали")
             return
         
-        client_id, key = generate_key()
+        client_id, key, link = generate_key()  # ИСПРАВЛЕНО
         expiry = datetime.now() + timedelta(days=3)
-        link = f"vless://{client_id}@{SERVER_IP}:{SERVER_PORT}?security=none&type=tcp#{key}"
         
         key_data = {
             'key_value': key,
@@ -445,7 +520,6 @@ def handle_callback(call):
     elif data.startswith("plan_"):
         plan_id = data.replace("plan_", "")
         if plan_id in PLANS:
-            # ПОЛНОЕ ПРЕДУПРЕЖДЕНИЕ
             bot.edit_message_text("⚠️ **ПРАВИЛА ИСПОЛЬЗОВАНИЯ**\n\n"
                                   "❗️ Вы берете на себя всю ответственность за использование данного VPN.\n\n"
                                   "• Разработчик бота и сервиса не несет ответственности за ваши действия\n"
@@ -462,7 +536,6 @@ def handle_callback(call):
         plan_id = data.replace("accept_rules_", "")
         if plan_id in PLANS:
             plan = PLANS[plan_id]
-            # ПОКАЗЫВАЕМ ОКНО С ВЫБОРОМ ОПЛАТЫ
             bot.edit_message_text(f"💳 **{plan['name']}**\n\n"
                                   f"💰 Цена: {plan['price_rub']}₽ / {plan['price_usdt']} USDT\n\n"
                                   f"Выберите способ оплаты:",
@@ -476,9 +549,8 @@ def handle_callback(call):
         plan_id = data.replace("pay_crypto_", "")
         plan = PLANS[plan_id]
         
-        client_id, key = generate_key()
+        client_id, key, link = generate_key()  # ИСПРАВЛЕНО
         expiry = datetime.now() + timedelta(days=plan["days"])
-        link = f"vless://{client_id}@{SERVER_IP}:{SERVER_PORT}?security=none&type=tcp#{key}"
         
         invoice_id, pay_url = create_crypto_invoice(plan["price_usdt"], f"{plan['name']} ключ {key}")
         
@@ -591,9 +663,8 @@ def handle_callback(call):
             bot.answer_callback_query(call.id, "❌ Доступ запрещен", show_alert=True)
             return
         
-        client_id, key = generate_key()
+        client_id, key, link = generate_key()  # ИСПРАВЛЕНО
         expiry = datetime.now() + timedelta(days=30)
-        link = f"vless://{client_id}@{SERVER_IP}:{SERVER_PORT}?security=none&type=tcp#{key}"
         
         key_data = {
             'key_value': key,
@@ -664,87 +735,12 @@ def handle_callback(call):
                              reply_markup=main_menu())
         bot.answer_callback_query(call.id)
 
-def payment_menu(key, pay_url):
-    keyboard = InlineKeyboardMarkup(row_width=1)
-    keyboard.add(
-        InlineKeyboardButton("💳 Оплатить", url=pay_url),
-        InlineKeyboardButton("✅ Проверить оплату", callback_data=f"check_payment_{key}"),
-        InlineKeyboardButton("❌ Отменить", callback_data="cancel_order"),
-        InlineKeyboardButton("🏠 Главное меню", callback_data="main_menu")
-    )
-    return keyboard
-
-@bot.message_handler(commands=['mykeys'])
-def my_keys(message):
-    user_id = message.from_user.id
-    keys = get_user_keys(user_id)
-    
-    if not keys:
-        text = "🔑 **Ваши ключи**\n\nУ вас пока нет ключей."
-    else:
-        text = "🔑 **Ваши ключи**\n\n"
-        for k in keys:
-            if k['blocked']:
-                status = "❌ ЗАБЛОКИРОВАН"
-            elif k['is_paid']:
-                status = "✅"
-            else:
-                status = "⏳"
-            
-            if k['device_id'] and not k['blocked']:
-                status += f" 📱 (устр: {k['device_id'][:8]}...)"
-            
-            expiry = datetime.fromisoformat(k['expiry_date']).strftime('%d.%m.%Y')
-            plan_name = PLANS.get(k['plan_name'], {}).get('name', 'VPN') if k['plan_name'] else 'VPN'
-            
-            text += f"{status} **{plan_name}**\n"
-            text += f"🔗 `{k['full_link']}`\n"
-            text += f"📅 до {expiry}\n\n"
-    
-    bot.send_message(message.chat.id, text, parse_mode='Markdown', reply_markup=back_menu())
-
-@bot.message_handler(commands=['getkeyinfo'])
-def get_key_info(message):
-    try:
-        key = message.text.split()[1]
-        result = get_key_info(key)
-        
-        if not result['success']:
-            bot.reply_to(message, "❌ Ключ не найден")
-            return
-        
-        data = result['key_info']
-        msg = f"🔑 **Информация о ключе**\n\n"
-        msg += f"🔗 `{data['full_link']}`\n\n"
-        msg += f"📅 **Создан:** {format_datetime(datetime.fromisoformat(data['created_at']))}\n"
-        msg += f"📆 **Действует до:** {format_datetime(datetime.fromisoformat(data['expiry_date']))}\n"
-        
-        if data['blocked']:
-            msg += f"❌ **Статус:** ЗАБЛОКИРОВАН\n"
-        elif data['is_paid']:
-            msg += f"✅ **Оплачен:** {format_datetime(datetime.fromisoformat(data['payment_time']))}\n"
-        else:
-            msg += f"⏳ **Статус:** Ожидает оплаты\n"
-        
-        if data['plan_name']:
-            plan_name = PLANS.get(data['plan_name'], {}).get('name', data['plan_name'])
-            msg += f"📋 **Тариф:** {plan_name}\n"
-        
-        if data['device_id']:
-            msg += f"📱 **Привязан к устройству:** `{data['device_id']}`\n"
-        
-        bot.reply_to(message, msg, parse_mode='Markdown', reply_markup=back_menu())
-    except Exception as e:
-        bot.reply_to(message, f"❌ Ошибка: {e}")
-
 if __name__ == "__main__":
     print("=" * 60)
-    print("🤖 VPN БОТ (ИСПРАВЛЕННАЯ ОПЛАТА)")
+    print("🤖 VPN БОТ")
     print("=" * 60)
     print(f"👤 Админ ID: {ADMIN_ID}")
-    print(f"👥 Группа поддержки: {SUPPORT_GROUP_ID}")
-    print(f"🤖 Бот: @{BOT_USERNAME}")
-    print(f"📡 Xray API: {XRAY_API_URL}")
-    print("✅ База данных: vpn_database.db")
+    print(f"📁 База данных: {DB_PATH}")
+    print(f"🌐 Xray API: {XRAY_API_URL}")
     print("=" * 60)
     bot.infinity_polling()
