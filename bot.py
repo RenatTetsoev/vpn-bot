@@ -25,9 +25,6 @@ BOT_USERNAME = "vpnconnecting_bot"
 # API для Xray (порт 5001)
 XRAY_API_URL = "http://95.81.102.13:5001/add_client"
 
-# API для базы данных (порт 5002)
-DB_API_URL = "http://95.81.102.13:5002"
-
 # ========== ТАРИФЫ И ЦЕНЫ ==========
 PLANS = {
     "30days": {"days": 30, "price_rub": 100, "price_usdt": 1.50, "name": "📅 1 месяц"},
@@ -39,7 +36,7 @@ PLANS = {
 YOOKASSA_SHOP_ID = ""
 YOOKASSA_SECRET_KEY = ""
 
-# ========== ФУНКЦИИ ДЛЯ РАБОТЫ С API ==========
+# ========== ФУНКЦИИ ДЛЯ РАБОТЫ С XRAY ==========
 def add_client_to_xray(client_id, email):
     try:
         response = requests.post(XRAY_API_URL, 
@@ -56,83 +53,130 @@ def add_client_to_xray(client_id, email):
         print(f"❌ Ошибка соединения с API: {e}")
         return False
 
+# ========== БАЗА ДАННЫХ (ПРЯМОЕ ПОДКЛЮЧЕНИЕ) ==========
+def get_db():
+    conn = sqlite3.connect('vpn_database.db')
+    conn.row_factory = sqlite3.Row
+    return conn
+
+def init_db():
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS vpn_keys (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        key_value TEXT UNIQUE NOT NULL,
+        client_id TEXT UNIQUE NOT NULL,
+        full_link TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        expiry_date DATETIME,
+        is_paid BOOLEAN DEFAULT 0,
+        payment_time DATETIME,
+        telegram_id TEXT,
+        invoice_id TEXT UNIQUE,
+        is_free BOOLEAN DEFAULT 0,
+        device_id TEXT,
+        plan_name TEXT,
+        blocked BOOLEAN DEFAULT 0
+    )
+    ''')
+    conn.commit()
+    conn.close()
+    print("✅ База данных готова")
+
+init_db()
+
 def get_user_keys(telegram_id):
-    try:
-        response = requests.post(f"{DB_API_URL}/get_user_keys", 
-                                json={'telegram_id': telegram_id},
-                                timeout=5)
-        result = response.json()
-        if result.get('success'):
-            return result.get('keys', [])
-        return []
-    except Exception as e:
-        print(f"❌ Ошибка get_user_keys: {e}")
-        return []
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute('''
+    SELECT full_link, expiry_date, is_paid, plan_name, device_id, blocked 
+    FROM vpn_keys WHERE telegram_id = ? ORDER BY created_at DESC
+    ''', (str(telegram_id),))
+    keys = cursor.fetchall()
+    conn.close()
+    return [dict(k) for k in keys]
 
 def get_key_info(key_value):
-    try:
-        response = requests.post(f"{DB_API_URL}/get_key_info", 
-                                json={'key_value': key_value},
-                                timeout=5)
-        return response.json()
-    except Exception as e:
-        print(f"❌ Ошибка get_key_info: {e}")
-        return {'success': False}
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute('''
+    SELECT key_value, full_link, created_at, expiry_date, is_paid, payment_time, plan_name, device_id, blocked 
+    FROM vpn_keys WHERE key_value = ?
+    ''', (key_value,))
+    data = cursor.fetchone()
+    conn.close()
+    if data:
+        return {'success': True, 'key_info': dict(data)}
+    return {'success': False}
 
 def add_key_to_db(key_data):
+    conn = get_db()
+    cursor = conn.cursor()
     try:
-        response = requests.post(f"{DB_API_URL}/add_key", 
-                                json=key_data,
-                                timeout=5)
-        result = response.json()
-        return result.get('success', False)
+        cursor.execute('''
+        INSERT INTO vpn_keys (key_value, client_id, full_link, expiry_date, telegram_id, is_paid, is_free, plan_name, invoice_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (key_data['key_value'], key_data['client_id'], key_data['full_link'], 
+              key_data['expiry_date'], str(key_data['telegram_id']), key_data['is_paid'], 
+              key_data['is_free'], key_data['plan_name'], key_data.get('invoice_id', '')))
+        conn.commit()
+        conn.close()
+        return True
     except Exception as e:
-        print(f"❌ Ошибка add_key_to_db: {e}")
+        print(f"❌ Ошибка базы: {e}")
+        conn.close()
         return False
 
 def update_key_paid(key_value, payment_time):
+    conn = get_db()
+    cursor = conn.cursor()
     try:
-        response = requests.post(f"{DB_API_URL}/update_key_paid", 
-                                json={'key_value': key_value, 'payment_time': payment_time},
-                                timeout=5)
-        return response.json().get('success', False)
+        cursor.execute('''
+        UPDATE vpn_keys SET is_paid = 1, payment_time = ? WHERE key_value = ?
+        ''', (payment_time, key_value))
+        conn.commit()
+        conn.close()
+        return True
     except Exception as e:
-        print(f"❌ Ошибка update_key_paid: {e}")
+        print(f"❌ Ошибка обновления: {e}")
+        conn.close()
         return False
 
 def delete_unpaid_key(key_value):
+    conn = get_db()
+    cursor = conn.cursor()
     try:
-        response = requests.post(f"{DB_API_URL}/delete_key", 
-                                json={'key_value': key_value},
-                                timeout=5)
-        return response.json().get('success', False)
+        cursor.execute('DELETE FROM vpn_keys WHERE key_value = ? AND is_paid = 0', (key_value,))
+        conn.commit()
+        conn.close()
+        return True
     except Exception as e:
-        print(f"❌ Ошибка delete_unpaid_key: {e}")
+        print(f"❌ Ошибка удаления: {e}")
+        conn.close()
         return False
 
 def check_free_key(telegram_id):
-    try:
-        response = requests.post(f"{DB_API_URL}/check_free_key", 
-                                json={'telegram_id': telegram_id},
-                                timeout=5)
-        result = response.json()
-        if result.get('success'):
-            return result.get('free_count', 0)
-        return 0
-    except Exception as e:
-        print(f"❌ Ошибка check_free_key: {e}")
-        return 0
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute('''
+    SELECT COUNT(*) FROM vpn_keys 
+    WHERE telegram_id = ? AND is_free = 1 AND plan_name = 'free_3days'
+    ''', (str(telegram_id),))
+    count = cursor.fetchone()[0]
+    conn.close()
+    return count
 
 def get_admin_stats():
-    try:
-        response = requests.get(f"{DB_API_URL}/admin_stats", timeout=5)
-        result = response.json()
-        if result.get('success'):
-            return result.get('stats', {})
-        return {}
-    except Exception as e:
-        print(f"❌ Ошибка get_admin_stats: {e}")
-        return {}
+    conn = get_db()
+    cursor = conn.cursor()
+    total = cursor.execute('SELECT COUNT(*) FROM vpn_keys').fetchone()[0]
+    paid = cursor.execute('SELECT COUNT(*) FROM vpn_keys WHERE is_paid = 1').fetchone()[0]
+    free = cursor.execute('SELECT COUNT(*) FROM vpn_keys WHERE is_free = 1').fetchone()[0]
+    active = cursor.execute('SELECT COUNT(*) FROM vpn_keys WHERE is_paid = 1 AND datetime(expiry_date) > datetime("now")').fetchone()[0]
+    blocked = cursor.execute('SELECT COUNT(*) FROM vpn_keys WHERE blocked = 1').fetchone()[0]
+    conn.close()
+    return {'total': total, 'paid': paid, 'free': free, 'active': active, 'blocked': blocked}
 
 # ========== ОСТАЛЬНЫЕ ФУНКЦИИ ==========
 def generate_key():
@@ -180,6 +224,8 @@ def check_invoice_status(invoice_id):
         return False
     except:
         return False
+
+orders = {}
 
 # ========== КНОПКИ ==========
 def main_menu():
@@ -486,7 +532,7 @@ def handle_callback(call):
             
             if update_key_paid(key, payment_time):
                 key_info = get_key_info(key)
-                if key_info.get('success'):
+                if key_info['success']:
                     data = key_info['key_info']
                     client_id = key
                     add_client_to_xray(client_id, f"paid_{key}")
@@ -583,11 +629,11 @@ def handle_callback(call):
         stats = get_admin_stats()
         
         bot.edit_message_text(f"📊 **СТАТИСТИКА**\n\n"
-                              f"🔑 Всего ключей: {stats.get('total', 0)}\n"
-                              f"✅ Оплаченных: {stats.get('paid', 0)}\n"
-                              f"🎁 Бесплатных: {stats.get('free', 0)}\n"
-                              f"⚡️ Активных: {stats.get('active', 0)}\n"
-                              f"❌ Заблокировано: {stats.get('blocked', 0)}",
+                              f"🔑 Всего ключей: {stats['total']}\n"
+                              f"✅ Оплаченных: {stats['paid']}\n"
+                              f"🎁 Бесплатных: {stats['free']}\n"
+                              f"⚡️ Активных: {stats['active']}\n"
+                              f"❌ Заблокировано: {stats['blocked']}",
                              chat_id=call.message.chat.id,
                              message_id=call.message.message_id,
                              parse_mode='Markdown',
@@ -665,7 +711,7 @@ def get_key_info(message):
         key = message.text.split()[1]
         result = get_key_info(key)
         
-        if not result.get('success'):
+        if not result['success']:
             bot.reply_to(message, "❌ Ключ не найден")
             return
         
@@ -690,20 +736,17 @@ def get_key_info(message):
             msg += f"📱 **Привязан к устройству:** `{data['device_id']}`\n"
         
         bot.reply_to(message, msg, parse_mode='Markdown', reply_markup=back_menu())
-    except:
-        bot.reply_to(message, "❌ Используйте: /getkeyinfo КЛЮЧ")
-
-orders = {}
+    except Exception as e:
+        bot.reply_to(message, f"❌ Ошибка: {e}")
 
 if __name__ == "__main__":
     print("=" * 60)
-    print("🤖 VPN БОТ (С ОТДЕЛЬНЫМ API БАЗЫ)")
+    print("🤖 VPN БОТ (ПРЯМАЯ РАБОТА С БАЗОЙ)")
     print("=" * 60)
     print(f"👤 Админ ID: {ADMIN_ID}")
     print(f"👥 Группа поддержки: {SUPPORT_GROUP_ID}")
     print(f"🤖 Бот: @{BOT_USERNAME}")
     print(f"📡 Xray API: {XRAY_API_URL}")
-    print(f"📡 DB API: {DB_API_URL}")
-    print("✅ Запуск...")
+    print("✅ База данных: vpn_database.db (прямое подключение)")
     print("=" * 60)
     bot.infinity_polling()
