@@ -20,7 +20,7 @@ SERVER_PORT = 443
 ADMIN_ID = 1684751552
 SUPPORT_GROUP_ID = -1003839964720
 CRYPTO_API_TOKEN = "540507:AAyXFAZkerRA5kUrrlOmNHs1mV4xZuBZKeO"
-BOT_USERNAME = "hiderconnect_bot"
+BOT_USERNAME = "vpnconnecting_bot"
 
 # API для Xray (порт 5001)
 XRAY_API_URL = "http://95.81.102.13:5001/add_client"
@@ -38,7 +38,43 @@ YOOKASSA_SHOP_ID = ""
 YOOKASSA_SECRET_KEY = ""
 
 # ========== БАЗА ДАННЫХ ==========
-DB_PATH = '/opt/vpnproxybot/vpn_database.db'
+# В контейнере bothost.ru папка /opt/vpnproxybot монтируется в /app
+DB_PATH = '/app/vpn_database.db'
+
+print(f"📁 Текущая директория: {os.getcwd()}")
+print(f"📁 Путь к БД: {DB_PATH}")
+print(f"📁 Файл существует: {os.path.exists(DB_PATH)}")
+
+# Если БД нет - создаем
+if not os.path.exists(DB_PATH):
+    print("❌ БД не найдена! Создаю новую...")
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS vpn_keys (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            key_value TEXT UNIQUE NOT NULL,
+            client_id TEXT UNIQUE NOT NULL,
+            full_link TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            expiry_date DATETIME,
+            is_paid BOOLEAN DEFAULT 0,
+            payment_time DATETIME,
+            telegram_id TEXT,
+            invoice_id TEXT UNIQUE,
+            is_free BOOLEAN DEFAULT 0,
+            device_id TEXT,
+            plan_name TEXT,
+            blocked BOOLEAN DEFAULT 0,
+            last_used DATETIME
+        )
+        ''')
+        conn.commit()
+        conn.close()
+        print("✅ Новая БД создана")
+    except Exception as e:
+        print(f"❌ Ошибка создания БД: {e}")
 
 def get_db():
     """Подключение к базе данных"""
@@ -742,6 +778,7 @@ if __name__ == "__main__":
     print("=" * 60)
     print(f"👤 Админ ID: {ADMIN_ID}")
     print(f"📁 База данных: {DB_PATH}")
+    print(f"📁 Файл существует: {os.path.exists(DB_PATH)}")
     print(f"🌐 Xray API: {XRAY_API_URL}")
     print("=" * 60)
-    bot.infinity_polling()
+    bot.infinity_polling
