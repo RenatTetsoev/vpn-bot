@@ -19,7 +19,7 @@ SERVER_PORT = 443
 ADMIN_ID = 1684751552
 SUPPORT_GROUP_ID = -1003839964720
 CRYPTO_API_TOKEN = "540507:AAyXFAZkerRA5kUrrlOmNHs1mV4xZuBZKeO"
-BOT_USERNAME = "vpnconnecting_bot"
+BOT_USERNAME = "hiderconnect_bot"
 
 # API для Xray (порт 5001)
 XRAY_API_URL = "http://95.81.102.13:5001/add_client"
