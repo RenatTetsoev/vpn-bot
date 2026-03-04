@@ -11,7 +11,7 @@ import subprocess
 from datetime import datetime, timedelta
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-TOKEN = '8632835912:AAFesJq2qhoBw4N_h5cmB-fVQauvvOwpUwQ'
+TOKEN = '8465303463:AAEuGBUAd-qK_y3agpcb9OeJYb6QNwAHrYM'
 bot = telebot.TeleBot(TOKEN)
 
 # ========== НАСТРОЙКИ ==========
