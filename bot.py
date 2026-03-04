@@ -440,7 +440,8 @@ def handle_callback(call):
         
         client_id, key = generate_key()
         expiry = datetime.now() + timedelta(days=3)
-        link = f"vless://{client_id}@{SERVER_IP}:{SERVER_PORT}?security=none&type=tcp#{key}"
+        # 👇 ИЗМЕНЕНО: Добавлена HTTP-маскировка
+        link = f"vless://{client_id}@{SERVER_IP}:{SERVER_PORT}?security=none&type=tcp&headerType=http&host=www.google.com#{key}"
         
         key_data = {
             'key_value': key,
@@ -502,7 +503,8 @@ def handle_callback(call):
         
         client_id, key = generate_key()
         expiry = datetime.now() + timedelta(days=plan["days"])
-        link = f"vless://{client_id}@{SERVER_IP}:{SERVER_PORT}?security=none&type=tcp#{key}"
+        # 👇 ИЗМЕНЕНО: Добавлена HTTP-маскировка
+        link = f"vless://{client_id}@{SERVER_IP}:{SERVER_PORT}?security=none&type=tcp&headerType=http&host=www.google.com#{key}"
         
         invoice_id, pay_url = create_crypto_invoice(plan["price_usdt"], f"{plan['name']} ключ {key}")
         
@@ -617,7 +619,8 @@ def handle_callback(call):
         
         client_id, key = generate_key()
         expiry = datetime.now() + timedelta(days=30)
-        link = f"vless://{client_id}@{SERVER_IP}:{SERVER_PORT}?security=none&type=tcp#{key}"
+        # 👇 ИЗМЕНЕНО: Добавлена HTTP-маскировка
+        link = f"vless://{client_id}@{SERVER_IP}:{SERVER_PORT}?security=none&type=tcp&headerType=http&host=www.google.com#{key}"
         
         key_data = {
             'key_value': key,
@@ -763,7 +766,7 @@ def get_key_info(message):
 
 if __name__ == "__main__":
     print("=" * 60)
-    print("🤖 VPN БОТ (ПРЯМАЯ РАБОТА С БАЗОЙ)")
+    print("🤖 VPN БОТ (С HTTP-МАСКИРОВКОЙ)")
     print("=" * 60)
     print(f"👤 Админ ID: {ADMIN_ID}")
     print(f"👥 Группа поддержки: {SUPPORT_GROUP_ID}")
