@@ -32,11 +32,18 @@ PLANS = {
     "365days": {"days": 365, "price_rub": 1000, "price_usdt": 13.00, "name": "📅 12 месяцев"}
 }
 
-# ЮKassa (можно оставить пустыми если не используется)
+# ЮKassa
 YOOKASSA_SHOP_ID = ""
 YOOKASSA_SECRET_KEY = ""
 
+# ========== БАЗА ДАННЫХ ==========
 DB_PATH = '/opt/vpnproxybot/vpn_database.db'
+
+def get_db():
+    """Подключение к базе данных"""
+    conn = sqlite3.connect(DB_PATH, timeout=10)
+    conn.row_factory = sqlite3.Row
+    return conn
 
 # ========== ФУНКЦИИ ДЛЯ РАБОТЫ С XRAY ==========
 def is_uuid(val):
@@ -77,13 +84,7 @@ def add_client_to_xray(client_id, email):
         print(f"❌ Ошибка соединения с API: {e}")
         return False
 
-# ========== БАЗА ДАННЫХ ==========
-def get_db():
-    """Подключение к существующей базе данных"""
-    conn = sqlite3.connect(DB_PATH, timeout=10)
-    conn.row_factory = sqlite3.Row
-    return conn
-
+# ========== ФУНКЦИИ РАБОТЫ С БД ==========
 def get_user_keys(telegram_id):
     conn = get_db()
     cursor = conn.cursor()
@@ -488,7 +489,7 @@ def handle_callback(call):
             bot.answer_callback_query(call.id, "Уже получали")
             return
         
-        client_id, key, link = generate_key()  # ИСПРАВЛЕНО
+        client_id, key, link = generate_key()
         expiry = datetime.now() + timedelta(days=3)
         
         key_data = {
@@ -549,7 +550,7 @@ def handle_callback(call):
         plan_id = data.replace("pay_crypto_", "")
         plan = PLANS[plan_id]
         
-        client_id, key, link = generate_key()  # ИСПРАВЛЕНО
+        client_id, key, link = generate_key()
         expiry = datetime.now() + timedelta(days=plan["days"])
         
         invoice_id, pay_url = create_crypto_invoice(plan["price_usdt"], f"{plan['name']} ключ {key}")
@@ -604,8 +605,7 @@ def handle_callback(call):
                 key_info = get_key_info(key)
                 if key_info['success']:
                     data = key_info['key_info']
-                    client_id = key
-                    add_client_to_xray(client_id, f"paid_{key}")
+                    add_client_to_xray(key, f"paid_{key}")
                     
                     bot.send_message(user_id,
                                    f"✅ **ОПЛАЧЕНО!**\n\n"
@@ -663,7 +663,7 @@ def handle_callback(call):
             bot.answer_callback_query(call.id, "❌ Доступ запрещен", show_alert=True)
             return
         
-        client_id, key, link = generate_key()  # ИСПРАВЛЕНО
+        client_id, key, link = generate_key()
         expiry = datetime.now() + timedelta(days=30)
         
         key_data = {
