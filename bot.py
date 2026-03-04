@@ -11,7 +11,6 @@ import subprocess
 from datetime import datetime, timedelta
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-# ========== НОВЫЙ ТОКЕН ==========
 TOKEN = '8465303463:AAEuGBUAd-qK_y3agpcb9OeJYb6QNwAHrYM'
 bot = telebot.TeleBot(TOKEN)
 
@@ -23,11 +22,10 @@ SUPPORT_GROUP_ID = -1003839964720
 CRYPTO_API_TOKEN = "540507:AAyXFAZkerRA5kUrrlOmNHs1mV4xZuBZKeO"
 BOT_USERNAME = "vpnconnecting_bot"
 
-# API для Xray (порт 5001)
 XRAY_API_URL = "http://95.81.102.13:5001/add_client"
 XRAY_CHECK_URL = "http://95.81.102.13:5001/check_device"
 
-# ========== ТАРИФЫ И ЦЕНЫ (ОБНОВЛЕНО) ==========
+# ========== ТАРИФЫ И ЦЕНЫ ==========
 PLANS = {
     "30days": {"days": 30, "price_rub": 100, "price_usdt": 1.50, "name": "📅 1 месяц"},
     "90days": {"days": 90, "price_rub": 250, "price_usdt": 3.30, "name": "📅 3 месяца"},
@@ -35,7 +33,6 @@ PLANS = {
     "365days": {"days": 365, "price_rub": 1000, "price_usdt": 13.00, "name": "📅 12 месяцев"}
 }
 
-# ЮKassa (не трогаем)
 YOOKASSA_SHOP_ID = ""
 YOOKASSA_SECRET_KEY = ""
 
@@ -181,12 +178,18 @@ def back_menu():
     keyboard.add(InlineKeyboardButton("🏠 Главное меню", callback_data="main_menu"))
     return keyboard
 
-def confirm_menu():
+def confirm_menu(plan_id=None):
     keyboard = InlineKeyboardMarkup(row_width=2)
-    keyboard.add(
-        InlineKeyboardButton("✅ Принимаю", callback_data="accept_rules"),
-        InlineKeyboardButton("❌ Отмена", callback_data="main_menu")
-    )
+    if plan_id:
+        keyboard.add(
+            InlineKeyboardButton("✅ Принимаю", callback_data=f"accept_rules_{plan_id}"),
+            InlineKeyboardButton("❌ Отмена", callback_data="main_menu")
+        )
+    else:
+        keyboard.add(
+            InlineKeyboardButton("✅ Принимаю", callback_data="accept_rules"),
+            InlineKeyboardButton("❌ Отмена", callback_data="main_menu")
+        )
     return keyboard
 
 @bot.message_handler(commands=['start'])
@@ -225,7 +228,6 @@ def handle_support_message(message):
 @bot.message_handler(commands=['reply'])
 def admin_reply(message):
     if message.chat.id != SUPPORT_GROUP_ID:
-        bot.reply_to(message, "❌ Эта команда работает только в группе поддержки")
         return
     if message.from_user.id != ADMIN_ID:
         bot.reply_to(message, "❌ У вас нет прав администратора")
@@ -245,8 +247,6 @@ def admin_reply(message):
                         f"_Если у вас остались вопросы, напишите снова._", 
                         parse_mode='Markdown')
         bot.reply_to(message, f"✅ **Ответ отправлен** пользователю `{user_id}`", parse_mode='Markdown')
-    except ValueError:
-        bot.reply_to(message, "❌ **Ошибка:** USER_ID должен быть числом", parse_mode='Markdown')
     except Exception as e:
         bot.reply_to(message, f"❌ **Ошибка:** {str(e)}", parse_mode='Markdown')
 
@@ -345,7 +345,6 @@ def handle_callback(call):
     elif data.startswith("plan_"):
         plan_id = data.replace("plan_", "")
         if plan_id in PLANS:
-            # Сохраняем выбранный план в данных пользователя
             bot.edit_message_text("⚠️ **ПРАВИЛА ИСПОЛЬЗОВАНИЯ**\n\n"
                                   "❗️ Вы берете на себя всю ответственность за использование данного VPN.\n\n"
                                   "• Разработчик бота и сервиса не несет ответственности за ваши действия\n"
@@ -355,14 +354,11 @@ def handle_callback(call):
                                  chat_id=call.message.chat.id,
                                  message_id=call.message.message_id,
                                  parse_mode='Markdown',
-                                 reply_markup=confirm_menu())
-            # Сохраняем выбранный план в данных колбэка
+                                 reply_markup=confirm_menu(plan_id))
             bot.answer_callback_query(call.id)
-            # Временно сохраняем план в данных
-            call.data = f"confirm_plan_{plan_id}"
 
-    elif data.startswith("confirm_plan_"):
-        plan_id = data.replace("confirm_plan_", "")
+    elif data.startswith("accept_rules_"):
+        plan_id = data.replace("accept_rules_", "")
         if plan_id in PLANS:
             plan = PLANS[plan_id]
             bot.edit_message_text(f"💳 **{plan['name']}**\n\n"
@@ -373,14 +369,6 @@ def handle_callback(call):
                                  parse_mode='Markdown',
                                  reply_markup=payment_methods_menu(plan_id, plan))
             bot.answer_callback_query(call.id)
-
-    elif data == "accept_rules":
-        bot.edit_message_text("📋 **Выберите тариф:**", 
-                             chat_id=call.message.chat.id,
-                             message_id=call.message.message_id,
-                             parse_mode='Markdown',
-                             reply_markup=plans_menu())
-        bot.answer_callback_query(call.id)
 
     elif data.startswith("pay_crypto_"):
         plan_id = data.replace("pay_crypto_", "")
@@ -672,7 +660,7 @@ def get_key_info(message):
 
 if __name__ == "__main__":
     print("=" * 60)
-    print("🤖 VPN БОТ (ОБНОВЛЕННАЯ СИСТЕМА ПЛАТЕЖЕЙ)")
+    print("🤖 VPN БОТ (ИСПРАВЛЕННАЯ СИСТЕМА ОПЛАТЫ)")
     print("=" * 60)
     print(f"👤 Админ ID: {ADMIN_ID}")
     print(f"👥 Группа поддержки: {SUPPORT_GROUP_ID}")
