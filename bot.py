@@ -310,31 +310,48 @@ def admin_panel(message):
 
 @bot.message_handler(func=lambda message: True)
 def handle_support_message(message):
+    # Игнорируем команды
     if message.text and message.text.startswith('/'):
         return
+    
+    # Если сообщение из лички - пересылаем в группу поддержки
     if message.chat.type == 'private':
+        # Пересылаем сообщение в группу
         bot.forward_message(SUPPORT_GROUP_ID, message.chat.id, message.message_id)
+        
+        # Отправляем информацию о пользователе
         user_info = f"🆔 **ID:** {message.from_user.id}\n"
         user_info += f"👤 **Имя:** {message.from_user.first_name}\n"
         if message.from_user.username:
             user_info += f"📱 **Username:** @{message.from_user.username}\n"
         user_info += f"📝 **Сообщение:** {message.text}"
+        
         bot.send_message(SUPPORT_GROUP_ID, user_info, parse_mode='Markdown')
+        
+        # Подтверждение пользователю
         bot.reply_to(message, "✅ Ваше сообщение отправлено в техподдержку. Ожидайте ответа.")
 
+# ========== ОТВЕТ ОТ АДМИНА ==========
 @bot.message_handler(commands=['reply'])
 def admin_reply(message):
+    # Проверяем, что сообщение из группы поддержки
     if message.chat.id != SUPPORT_GROUP_ID:
+        bot.reply_to(message, "❌ Эта команда работает только в группе поддержки")
         return
+    
+    # Проверяем, что отправитель - админ
     if message.from_user.id != ADMIN_ID:
         bot.reply_to(message, "❌ У вас нет прав администратора")
         return
     
     try:
+        # Разбираем сообщение: /reply 123456789 Текст сообщения
         parts = message.text.split(maxsplit=2)
+        
         if len(parts) < 3:
             bot.reply_to(message, 
-                        "❌ **Используйте:** `/reply USER_ID ТЕКСТ`\n"
+                        "❌ **Неправильный формат!**\n\n"
+                        "Используйте: `/reply USER_ID ТЕКСТ`\n"
                         "Например: `/reply 123456789 Ваш ключ активирован`", 
                         parse_mode='Markdown')
             return
@@ -342,13 +359,17 @@ def admin_reply(message):
         user_id = int(parts[1])
         reply_text = parts[2]
         
+        # Отправляем ответ пользователю
         bot.send_message(user_id, 
                         f"📨 **Ответ от поддержки:**\n\n{reply_text}\n\n"
                         f"_Если у вас остались вопросы, напишите снова._", 
                         parse_mode='Markdown')
         
+        # Подтверждение админу в группу
         bot.reply_to(message, f"✅ **Ответ отправлен** пользователю `{user_id}`", parse_mode='Markdown')
         
+    except ValueError:
+        bot.reply_to(message, "❌ **Ошибка:** USER_ID должен быть числом", parse_mode='Markdown')
     except Exception as e:
         bot.reply_to(message, f"❌ **Ошибка:** {str(e)}", parse_mode='Markdown')
 
@@ -356,6 +377,7 @@ def admin_reply(message):
 def support_command(message):
     if message.chat.id == SUPPORT_GROUP_ID:
         return
+    
     bot.reply_to(message, 
                 "🆘 **Техподдержка**\n\n"
                 "Напишите ваш вопрос, и мы ответим в ближайшее время.",
